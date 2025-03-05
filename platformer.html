@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Top Down Shooter PvP Game with Sword</title>
+  <!-- Load Phaser 3 -->
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.js"></script>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    /* Fullscreen game container */
+    #game-container {
+      width: 100vw;
+      height: 100vh;
+      display: none;
+    }
+    /* Centered overlay for login */
+    #login-container {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 300px;
+      background: rgba(0,0,0,0.8);
+      color: #fff;
+      padding: 20px;
+      border-radius: 10px;
+      text-align: center;
+      z-index: 1001;
+    }
+    #login-container input {
+      width: 80%;
+      padding: 8px;
+      margin: 10px 0;
+    }
+    #login-container button {
+      padding: 8px 16px;
+    }
+    /* Mod popup overlay */
+    #mod-popup {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      background: rgba(0,0,0,0.8);
+      color: #fff;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 1002;
+    }
+    #mod-popup input {
+      width: 100%;
+      padding: 5px;
+      margin: 5px 0;
+    }
+    #mod-popup button {
+      padding: 5px 10px;
+      margin: 3px 0;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <!-- Login Overlay -->
+  <div id="login-container">
+    <h2>Login</h2>
+    <input type="text" id="username-input" placeholder="Enter your username" />
+    <br/>
+    <button id="login-button">Start Game</button>
+  </div>
+  
+  <!-- Mod Popup (for mods only) -->
+  <div id="mod-popup" style="display:none;">
+    <h3>Mod Settings</h3>
+    <input type="text" id="mod-display-name" placeholder="Enter your display name" />
+    <button id="toggle-speed">Toggle Speed (Off)</button>
+    <button id="toggle-rapid">Toggle Rapid Fire (Off)</button>
+    <button id="toggle-health">Toggle Extra Health (Off)</button>
+    <button id="mod-join-button">Join Game</button>
+  </div>
+  
+  <!-- Game Container -->
+  <div id="game-container"></div>
+  
+  <script type="module">
+    // Import Firebase modules
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-app.js";
+    import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-analytics.js";
+    import { getDatabase, ref, set, onChildAdded, onChildChanged, onChildRemoved, push } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-database.js";
+    
+    // Firebase configuration
+    const firebaseConfig = {
+      apiKey: "AIzaSyCssnOBJd20Q46CVF4iuuygLeqaMCqInhk",
+      authDomain: "platformer-e205c.firebaseapp.com",
+      projectId: "platformer-e205c",
+      storageBucket: "platformer-e205c.firebasestorage.app",
+      messagingSenderId: "350613298525",
+      appId: "1:350613298525:web:dddba101b6545241dadcb4",
+      measurementId: "G-3DT5KYV4MS"
+    };
+    
+    // Initialize Firebase
+    const appFirebase = initializeApp(firebaseConfig);
+    const analytics = getAnalytics(appFirebase);
+    const db = getDatabase(appFirebase);
+    
+    // Global login variables
+    let username = "";
+    let playerId = "";
+    let isMod = false;
+    
+    // Global mod setting toggles (for mod players)
+    let modSpeedEnabled = false;
+    let modRapidEnabled = false;
+    let modHealthEnabled = false;
+    
+    // Login handling
+    const loginButton = document.getElementById("login-button");
+    loginButton.addEventListener("click", () => {
+      const input = document.getElementById("username-input").value.trim();
+      if (input !== "") {
+        if (input === "Mod=True") {
+          isMod = true;
+          document.getElementById("login-container").style.display = "none";
+          document.getElementById("mod-popup").style.display = "block";
+        } else {
+          username = input;
+          playerId = "player_" + Math.floor(Math.random() * 10000);
+          document.getElementById("login-container").style.display = "none";
+          document.getElementById("game-container").style.display = "block";
+          startGame();
+        }
+      }
+    });
+    
+    // Mod popup toggle buttons
+    document.getElementById("toggle-speed").addEventListener("click", function(){
+      modSpeedEnabled = !modSpeedEnabled;
+      this.innerText = "Toggle Speed (" + (modSpeedEnabled ? "On" : "Off") + ")";
+    });
+    document.getElementById("toggle-rapid").addEventListener("click", function(){
+      modRapidEnabled = !modRapidEnabled;
+      this.innerText = "Toggle Rapid Fire (" + (modRapidEnabled ? "On" : "Off") + ")";
+    });
+    document.getElementById("toggle-health").addEventListener("click", function(){
+      modHealthEnabled = !modHealthEnabled;
+      this.innerText = "Toggle Extra Health (" + (modHealthEnabled ? "On" : "Off") + ")";
+    });
+    
+    // Mod join button handling – the popup stays visible during gameplay
+    const modJoinButton = document.getElementById("mod-join-button");
+    modJoinButton.addEventListener("click", () => {
+      const modDisplayName = document.getElementById("mod-display-name").value.trim();
+      if (modDisplayName !== "") {
+        username = modDisplayName;
+        playerId = "player_" + Math.floor(Math.random() * 10000);
+        document.getElementById("game-container").style.display = "block";
+        startGame();
+      }
+    });
+    
+    // --- Game Code ---
+    function startGame() {
+      const config = {
+        type: Phaser.AUTO,
+        parent: "game-container",
+        scale: {
+          mode: Phaser.Scale.FIT,
+          autoCenter: Phaser.Scale.CENTER_BOTH,
+          width: 800,
+          height: 600,
+        },
+        physics: {
+          default: "arcade",
+          arcade: { gravity: { x: 0, y: 0 }, debug: false }
+        },
+        scene: { preload: preload, create: create, update: update }
+      };
+      
+      const game = new Phaser.Game(config);
+      
+      let localPlayer;
+      let localHealthText;
+      let cursors;
+      let wasd;
+      let swordKey;
+      let bulletGroup;
+      let bulletMap = {};  // For tracking bullets from Firebase
+      let otherPlayers = {};  // Remote players
+      
+      // Base game parameters for non-mod players
+      const BASE_SPEED = 200;
+      const BASE_COOLDOWN = 500;
+      const BASE_HEALTH = 100;
+      // Mod values (if toggled on)
+      const MOD_SPEED = 400;
+      const MOD_COOLDOWN = 250;
+      const MOD_HEALTH = 200;
+      const bulletSpeed = 500;
+      const bulletDamage = 20;
+      const swordDamage = 30;
+      const swordRange = 50;
+      const swordCooldown = 800;
+      const offlineThreshold = 10000; // 10 seconds
+      
+      // Flag to ensure we redirect only once on death
+      let gameOverTriggered = false;
+      
+      function preload() {
+        // Generate a circle texture for the player model
+        const graphics = this.make.graphics({ x: 0, y: 0, add: false });
+        graphics.fillStyle(0x00ff00, 1);
+        graphics.fillCircle(16, 16, 16);
+        graphics.generateTexture("player", 32, 32);
+        
+        // Load background image (tile sprite)
+        this.load.image("bg", "https://labs.phaser.io/assets/skies/cavern2.png");
+        
+        // Generate a bullet texture
+        const bulletGraphics = this.make.graphics({ x: 0, y: 0, add: false });
+        bulletGraphics.fillStyle(0xffff00, 1);
+        bulletGraphics.fillRect(0, 0, 8, 8);
+        bulletGraphics.generateTexture("bullet", 8, 8);
+      }
+      
+      function create() {
+        // Add a tile sprite background
+        this.bg = this.add.tileSprite(0, 0, this.cameras.main.width, this.cameras.main.height, "bg").setOrigin(0, 0);
+        
+        // Determine starting parameters based on mod toggles (if mod)
+        let startingSpeed = isMod ? (modSpeedEnabled ? MOD_SPEED : BASE_SPEED) : BASE_SPEED;
+        let startingCooldown = isMod ? (modRapidEnabled ? MOD_COOLDOWN : BASE_COOLDOWN) : BASE_COOLDOWN;
+        let startingHealth = isMod ? (modHealthEnabled ? MOD_HEALTH : BASE_HEALTH) : BASE_HEALTH;
+        
+        // Create the local player at the center
+        localPlayer = this.physics.add.sprite(this.cameras.main.width / 2, this.cameras.main.height / 2, "player");
+        localPlayer.setCollideWorldBounds(true);
+        localPlayer.health = startingHealth;
+        localPlayer.speed = startingSpeed;
+        localPlayer.shootCooldown = startingCooldown;
+        localPlayer.lastShotTime = 0;
+        localPlayer.lastSwordTime = 0;
+        
+        // Display local player's health
+        localHealthText = this.add.text(10, 10, "Health: " + localPlayer.health, { fontSize: '16px', fill: '#fff' });
+        
+        // Create a group for bullets
+        bulletGroup = this.physics.add.group();
+        
+        // Set up keyboard input for arrow keys, WASD, and sword (E key)
+        cursors = this.input.keyboard.createCursorKeys();
+        wasd = this.input.keyboard.addKeys({ 
+          up: Phaser.Input.Keyboard.KeyCodes.W, 
+          down: Phaser.Input.Keyboard.KeyCodes.S, 
+          left: Phaser.Input.Keyboard.KeyCodes.A, 
+          right: Phaser.Input.Keyboard.KeyCodes.D 
+        });
+        swordKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+        
+        // Firebase listeners for players
+        const playersRef = ref(db, "players");
+        onChildAdded(playersRef, (data) => {
+          const pid = data.key;
+          if (pid === playerId) return;  // Skip local player's data
+          const dataVal = data.val();
+          if (!otherPlayers[pid]) {
+            const remote = this.physics.add.sprite(dataVal.x, dataVal.y, "player");
+            remote.setCollideWorldBounds(true);
+            remote.health = dataVal.health;
+            const remoteText = this.add.text(dataVal.x, dataVal.y - 30, dataVal.username + " (" + dataVal.health + ")", { fontSize: '14px', fill: '#fff' });
+            remoteText.setOrigin(0.5);
+            otherPlayers[pid] = { sprite: remote, text: remoteText, lastPing: dataVal.lastPing };
+          }
+          // Check for sword action on remote players
+          if(dataVal.action === "sword" && dataVal.swordAngle !== undefined) {
+            spawnRemoteSword(this, otherPlayers[pid], dataVal.swordAngle);
+          }
+        });
+        
+        onChildChanged(playersRef, (data) => {
+          const pid = data.key;
+          if (pid === playerId) return;
+          const dataVal = data.val();
+          if (otherPlayers[pid]) {
+            const remote = otherPlayers[pid].sprite;
+            remote.health = dataVal.health;
+            remote.x = dataVal.x;
+            remote.y = dataVal.y;
+            otherPlayers[pid].text.setText(dataVal.username + " (" + dataVal.health + ")");
+            otherPlayers[pid].text.setPosition(remote.x, remote.y - 30);
+            otherPlayers[pid].lastPing = dataVal.lastPing;
+            if (remote.health <= 0) {
+              remote.destroy();
+              otherPlayers[pid].text.destroy();
+              delete otherPlayers[pid];
+            }
+          }
+          // Check for sword action on remote players
+          if(dataVal.action === "sword" && dataVal.swordAngle !== undefined) {
+            spawnRemoteSword(this, otherPlayers[pid], dataVal.swordAngle);
+          }
+        });
+        
+        onChildRemoved(playersRef, (data) => {
+          const pid = data.key;
+          if (otherPlayers[pid]) {
+            otherPlayers[pid].sprite.destroy();
+            otherPlayers[pid].text.destroy();
+            delete otherPlayers[pid];
+          }
+        });
+        
+        // Firebase listeners for bullets
+        const bulletsRef = ref(db, "bullets");
+        bulletMap = {};
+        onChildAdded(bulletsRef, (data) => {
+          if (bulletMap[data.key]) return;
+          const bData = data.val();
+          const bullet = bulletGroup.create(bData.x, bData.y, "bullet");
+          bullet.shooter = bData.shooter;
+          bullet.body.allowGravity = false;
+          bullet.setVelocity(bData.vx, bData.vy);
+          bullet.bulletId = data.key;
+          bulletMap[data.key] = bullet;
+        });
+        onChildRemoved(bulletsRef, (data) => {
+          if (bulletMap[data.key]) {
+            bulletMap[data.key].destroy();
+            delete bulletMap[data.key];
+          }
+        });
+      }
+      
+      // Function to spawn a sword animation for remote players.
+      // The sword is displayed for 300ms.
+      function spawnRemoteSword(scene, remotePlayerObj, angle) {
+        if (!remotePlayerObj || remotePlayerObj.swordActive) return;
+        remotePlayerObj.swordActive = true;
+        // Create a sword (a red rectangle) positioned relative to the remote sprite.
+        const sword = scene.add.rectangle(remotePlayerObj.sprite.x, remotePlayerObj.sprite.y, 40, 8, 0xff0000);
+        sword.setOrigin(0, 0.5);
+        sword.rotation = angle;
+        // Position the sword at an offset from the player (e.g. 30 pixels)
+        sword.x += Math.cos(angle) * 30;
+        sword.y += Math.sin(angle) * 30;
+        // Tween to fade out and then destroy the sword.
+        scene.tweens.add({
+          targets: sword,
+          alpha: 0,
+          duration: 300,
+          onComplete: () => {
+            sword.destroy();
+            remotePlayerObj.swordActive = false;
+          }
+        });
+      }
+      
+      // Function to perform a sword attack locally.
+      function performSwordAttack(scene, time) {
+        localPlayer.lastSwordTime = time;
+        // Determine sword attack angle (toward pointer)
+        const pointer = scene.input.activePointer;
+        const angle = Phaser.Math.Angle.Between(localPlayer.x, localPlayer.y, pointer.worldX, pointer.worldY);
+        
+        // Spawn a local sword sprite (a red rectangle) with a swing animation.
+        const sword = scene.add.rectangle(localPlayer.x, localPlayer.y, 40, 8, 0xff0000);
+        sword.setOrigin(0, 0.5);
+        sword.rotation = angle;
+        sword.x += Math.cos(angle) * 30;
+        sword.y += Math.sin(angle) * 30;
+        scene.tweens.add({
+          targets: sword,
+          alpha: 0,
+          duration: 300,
+          onComplete: () => {
+            sword.destroy();
+          }
+        });
+        
+        // Check collision with remote players: if within swordRange and in similar direction, apply damage.
+        const swordDir = new Phaser.Math.Vector2(Math.cos(angle), Math.sin(angle));
+        for (const pid in otherPlayers) {
+          const remote = otherPlayers[pid].sprite;
+          const diff = new Phaser.Math.Vector2(remote.x - localPlayer.x, remote.y - localPlayer.y);
+          if (diff.length() < swordRange) {
+            // Check if remote player is roughly in the sword swing direction.
+            if (swordDir.dot(diff.normalize()) > 0.7) {
+              // Damage remote player by 30.
+              const newHealth = remote.health - swordDamage;
+              const playerRef = ref(db, "players/" + pid);
+              set(playerRef, {
+                x: remote.x,
+                y: remote.y,
+                username: otherPlayers[pid].text.text.split(" (")[0],
+                health: newHealth,
+                lastPing: Date.now()
+              });
+            }
+          }
+        }
+        
+        // Update local player's Firebase state with sword action and swordAngle.
+        set(ref(db, "players/" + playerId), {
+          x: localPlayer.x,
+          y: localPlayer.y,
+          username: username,
+          health: localPlayer.health,
+          action: "sword",
+          swordAngle: angle,
+          lastPing: Date.now()
+        });
+        
+        // Reset action to idle after 300ms.
+        setTimeout(() => {
+          set(ref(db, "players/" + playerId), {
+            x: localPlayer.x,
+            y: localPlayer.y,
+            username: username,
+            health: localPlayer.health,
+            action: "idle",
+            lastPing: Date.now()
+          });
+        }, 300);
+      }
+      
+      function update(time, delta) {
+        // If mod, update the player's speed and shoot cooldown dynamically
+        if (isMod) {
+          localPlayer.speed = modSpeedEnabled ? MOD_SPEED : BASE_SPEED;
+          localPlayer.shootCooldown = modRapidEnabled ? MOD_COOLDOWN : BASE_COOLDOWN;
+          if(modHealthEnabled && localPlayer.health < MOD_HEALTH) {
+            localPlayer.health = MOD_HEALTH;
+            localHealthText.setText("Health: " + localPlayer.health);
+          }
+        }
+        
+        // Local player movement using arrow keys or WASD
+        localPlayer.setVelocity(0);
+        if (cursors.left.isDown || wasd.left.isDown) {
+          localPlayer.setVelocityX(-localPlayer.speed);
+        } else if (cursors.right.isDown || wasd.right.isDown) {
+          localPlayer.setVelocityX(localPlayer.speed);
+        }
+        if (cursors.up.isDown || wasd.up.isDown) {
+          localPlayer.setVelocityY(-localPlayer.speed);
+        } else if (cursors.down.isDown || wasd.down.isDown) {
+          localPlayer.setVelocityY(localPlayer.speed);
+        }
+        
+        // Rotate local player to face pointer
+        const pointer = this.input.activePointer;
+        const angle = Phaser.Math.Angle.Between(localPlayer.x, localPlayer.y, pointer.worldX, pointer.worldY);
+        localPlayer.setRotation(angle);
+        
+        // Sword attack: if E is pressed and cooldown has elapsed
+        if (Phaser.Input.Keyboard.JustDown(swordKey) && time > localPlayer.lastSwordTime + swordCooldown) {
+          performSwordAttack(this, time);
+        }
+        
+        // Shooting – fire if pointer is down and cooldown has elapsed
+        if (pointer.isDown && time > localPlayer.lastShotTime + localPlayer.shootCooldown) {
+          const dir = new Phaser.Math.Vector2(pointer.worldX - localPlayer.x, pointer.worldY - localPlayer.y).normalize();
+          const vx = dir.x * bulletSpeed;
+          const vy = dir.y * bulletSpeed;
+          const bulletRef = push(ref(db, "bullets"));
+          const bulletData = {
+            shooter: playerId,
+            x: localPlayer.x,
+            y: localPlayer.y,
+            vx: vx,
+            vy: vy,
+            timestamp: Date.now()
+          };
+          set(bulletRef, bulletData);
+          localPlayer.lastShotTime = time;
+        }
+        
+        // Bullet collision detection
+        for (const key in bulletMap) {
+          const b = bulletMap[key];
+          // Remove bullet if off screen
+          if (b.x < 0 || b.x > this.cameras.main.width || b.y < 0 || b.y > this.cameras.main.height) {
+            set(ref(db, "bullets/" + key), null);
+            continue;
+          }
+          // Bullet from remote: hit local player
+          if (b.shooter !== playerId) {
+            if (Phaser.Geom.Intersects.RectangleToRectangle(b.getBounds(), localPlayer.getBounds())) {
+              localPlayer.health -= bulletDamage;
+              localHealthText.setText("Health: " + localPlayer.health);
+              set(ref(db, "bullets/" + key), null);
+              if (localPlayer.health <= 0 && !gameOverTriggered) {
+                gameOverTriggered = true;
+                localPlayer.setTint(0xff0000);
+                localPlayer.setVelocity(0);
+                // Redirect upon death
+                window.location.href = "https://orangegames.w3spaces.com/platformer.html";
+              }
+            }
+          } else {
+            // Bullet from local: check collision with remote players
+            for (const pid in otherPlayers) {
+              const remote = otherPlayers[pid].sprite;
+              if (Phaser.Geom.Intersects.RectangleToRectangle(b.getBounds(), remote.getBounds())) {
+                const newHealth = remote.health - bulletDamage;
+                const playerRef = ref(db, "players/" + pid);
+                set(playerRef, {
+                  x: remote.x,
+                  y: remote.y,
+                  username: otherPlayers[pid].text.text.split(" (")[0],
+                  health: newHealth,
+                  lastPing: Date.now()
+                });
+                set(ref(db, "bullets/" + key), null);
+                break;
+              }
+            }
+          }
+        }
+        
+        // Update local player's state in Firebase (with heartbeat and current action if not sword)
+        // (If a sword attack is not happening, default action is determined by movement/shooting)
+        let currentAction = "idle";
+        if (localPlayer.body.velocity.x !== 0 || localPlayer.body.velocity.y !== 0) {
+          currentAction = "moving";
+        }
+        if (pointer.isDown && time > localPlayer.lastShotTime + localPlayer.shootCooldown) {
+          currentAction = "shooting";
+        }
+        // Only override if not in a sword attack (sword attack writes its own state)
+        if (localPlayer.lastSwordTime + 300 < time) {
+          set(ref(db, "players/" + playerId), {
+            x: localPlayer.x,
+            y: localPlayer.y,
+            username: username,
+            health: localPlayer.health,
+            action: currentAction,
+            lastPing: Date.now()
+          });
+        }
+        
+        // Remove remote players if their heartbeat is stale
+        for (const pid in otherPlayers) {
+          if (Date.now() - otherPlayers[pid].lastPing > offlineThreshold) {
+            otherPlayers[pid].sprite.destroy();
+            otherPlayers[pid].text.destroy();
+            delete otherPlayers[pid];
+          }
+        }
+      }
+      
+      // Remove local player entry when the window unloads
+      window.addEventListener('beforeunload', () => {
+        set(ref(db, "players/" + playerId), null);
+      });
+    }
+  </script>
+</body>
+</html>
