@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pode Game</title>
+    <style>
+        /* Cool CSS for the page */
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: linear-gradient(135deg, #6a11cb, #2575fc);
+            font-family: 'Arial', sans-serif;
+            color: white;
+            text-align: center;
+            overflow: hidden;
+        }
+
+        h1 {
+            font-size: 3rem;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        /* Cool CSS for the button */
+        button {
+            padding: 15px 30px;
+            font-size: 1.2rem;
+            color: white;
+            background: linear-gradient(135deg, #ff6f61, #ffcc00);
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button:hover {
+            transform: scale(1.1);
+            box-shadow: 0 6px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        button:active {
+            transform: scale(0.95);
+            box-shadow: 0 3px 5px rgba(0, 0, 0, 0.2);
+        }
+    </style>
+    <script type="text/javascript">
+        const popupWindows = []; // Array to store popup windows
+        const radius = 200; // Radius of the circle
+        const centerX = window.screen.availWidth / 2 - 100; // Center X (adjust for popup width)
+        const centerY = window.screen.availHeight / 2 - 100; // Center Y (adjust for popup height)
+        let angle = 0; // Starting angle
+        const angularSpeed = 0.1; // Speed of rotation (higher = faster)
+        const popupCount = 50; // Number of popups to open
+
+        function openPopups() {
+            for (let i = 0; i < popupCount; i++) {
+                const popupWindow = window.open("about:blank", `ShrekWindow${i}`, "width=200,height=200,left=100,top=100,status=1,toolbar=0");
+                if (popupWindow) {
+                    popupWindow.document.write(`
+                        <html>
+                        <head>
+                            <title>Shrek</title>
+                            <style>
+                                body { margin: 0; overflow: hidden; background-color: black; }
+                                img { width: 100%; height: 100%; }
+                            </style>
+                        </head>
+                        <body>
+                            <img src="https://upload.wikimedia.org/wikipedia/en/4/4d/Shrek_%28character%29.png" alt="Shrek">
+                        </body>
+                        </html>
+                    `);
+                    popupWindow.document.close();
+                    popupWindows.push(popupWindow); // Add the popup window to the array
+                }
+            }
+
+            // Start circular movement of the popup windows
+            movePopupsInCircle();
+        }
+
+        function movePopupsInCircle() {
+            if (popupWindows.length > 0) {
+                // Increment the angle for the next frame
+                angle += angularSpeed;
+
+                // Loop through each popup window and update its position
+                popupWindows.forEach((popupWindow, index) => {
+                    if (popupWindow && !popupWindow.closed) {
+                        // Calculate the new position on the circle
+                        const offsetAngle = angle + (index * (Math.PI * 2 / popupCount)); // Offset angle for each popup
+                        const x = centerX + radius * Math.cos(offsetAngle);
+                        const y = centerY + radius * Math.sin(offsetAngle);
+
+                        // Move the popup to the new position
+                        popupWindow.moveTo(x, y);
+                    }
+                });
+
+                // Request the next frame of animation
+                requestAnimationFrame(movePopupsInCircle);
+            }
+        }
+
+        // Clear resources if popups are closed
+        window.onbeforeunload = function() {
+            popupWindows.forEach(popupWindow => {
+                if (popupWindow && !popupWindow.closed) {
+                    popupWindow.close();
+                }
+            });
+        };
+    </script>
+</head>
+<body>
+    <div>
+        <h1>Pode Game</h1>
+        <button onclick="openPopups()">Open Game</button> <!-- Button to start the game -->
+        <button onclick="location.href='./math-calculator.html';" class="cool-button">Basketball Stars</button>
+        <button onclick="location.href='./slope-calc.html';" class="cool-button">Slope</button>
+        <button onclick="location.href='./james.html';" class="cool-button">James Game</button>
+        <button onclick="location.href='./james-chat.html';" class="cool-button">Chat</button>
+        <button onclick="location.href='./platformer.html';" class="cool-button">Online Shooter (testing)</button>
+        <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Endless Random Position Popup Windows</title>
+</head>
+<body>
+    <button onclick="startPopupChain()">Cool Button</button>
+
+    <script>
+        function getRandomPosition() {
+            const width = window.screen.width - 300;
+            const height = window.screen.height - 200;
+            const left = Math.floor(Math.random() * width);
+            const top = Math.floor(Math.random() * height);
+            return `width=300,height=200,left=${left},top=${top}`;
+        }
+
+        function createPopup() {
+            let popup = window.open('', '', getRandomPosition());
+            popup.document.write(`
+                <h2>Popup Window</h2>
+                <img src="./Shrek_character_2_.png" alt="El Rek">
+                <script>
+                    window.onunload = function() {
+                        if (!window.opener.closed) {
+                            window.opener.createTwoPopups();
+                        }
+                    };
+                <\/script>
+            `);
+        }
+
+        function createTwoPopups() {
+            setTimeout(() => {
+                createPopup();
+                createPopup();
+            }, 100);
+        }
+
+        function startPopupChain() {
+            createPopup();
+        }
+    </script>
+</body>
+</html>
+
+
+    </div>
+</body>
+</html>
