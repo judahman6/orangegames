@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pode's Chat</title>
+  <style>
+    /* General styling */
+    body {
+      font-family: 'Consolas', monospace;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+      overflow: hidden;
+      background: black;
+      position: relative;
+      color: white;
+    }
+    /* Starfield */
+    .stars {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+    }
+    .star {
+      position: absolute;
+      width: 2px;
+      height: 2px;
+      background: white;
+      opacity: 0.8;
+      animation: twinkle 3s infinite alternate;
+    }
+    @keyframes twinkle {
+      0% { opacity: 0.5; }
+      100% { opacity: 1; }
+    }
+    /* Popup style */
+    .popup {
+      position: fixed;
+      top: 20%;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.9);
+      color: white;
+      padding: 20px;
+      border: 2px solid #00ccff;
+      border-radius: 8px;
+      z-index: 100;
+      text-align: center;
+      font-size: 18px;
+    }
+    /* Modal common style */
+    .modal {
+      position: fixed;
+      top: 20%;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.95);
+      color: white;
+      padding: 20px;
+      border: 2px solid #00ccff;
+      border-radius: 8px;
+      z-index: 100;
+      display: none;
+      width: 300px;
+    }
+    .modal h3 {
+      margin-top: 0;
+      text-align: center;
+    }
+    .user-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: 5px 0;
+      border-bottom: 1px solid #00ccff;
+      padding-bottom: 5px;
+    }
+    .modal button.close-btn {
+      margin-top: 10px;
+      width: 100%;
+      background: #0088cc;
+    }
+    /* Login Screen */
+    .login-screen {
+      position: absolute;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0, 0, 0, 0.9);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+      text-align: center;
+      z-index: 40;
+    }
+    .login-screen input {
+      padding: 10px;
+      font-size: 18px;
+      margin-top: 10px;
+      text-align: center;
+      border: none;
+      background: rgba(0, 0, 50, 0.8);
+      color: white;
+      border-radius: 5px;
+      box-shadow: 0px 0px 10px rgba(0, 162, 255, 0.5);
+    }
+    .login-screen button {
+      margin-top: 15px;
+      padding: 10px 20px;
+      background: #00ccff;
+      border: none;
+      font-size: 18px;
+      cursor: pointer;
+      box-shadow: 0px 0px 15px #00ccff;
+    }
+    /* Chat UI */
+    .chat-container {
+      display: none;
+      width: 450px;
+      background: rgba(0, 0, 0, 0.8);
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0px 0px 15px rgba(0, 162, 255, 0.8);
+      text-align: center;
+      z-index: 30;
+    }
+    h2 {
+      font-size: 20px;
+      color: #00ccff;
+      text-shadow: 0px 0px 8px #00ccff;
+    }
+    /* Chat Box */
+    #chat-box {
+      height: 300px;
+      overflow-y: auto;
+      background: rgba(10, 10, 30, 0.9);
+      padding: 10px;
+      border: 1px solid #00ccff;
+      box-shadow: 0px 0px 10px #00ccff;
+      border-radius: 6px;
+      text-align: left;
+    }
+    .message {
+      background: rgba(0, 162, 255, 0.2);
+      padding: 6px;
+      margin: 5px;
+      border-radius: 6px;
+      box-shadow: 0px 0px 10px rgba(0, 162, 255, 0.8);
+    }
+    .system-message {
+      text-align: center;
+      color: #ffcc00;
+      font-style: italic;
+    }
+    .message.highlight, .system-message.highlight {
+      border: 2px solid #ff0000;
+    }
+    .message img {
+      max-width: 200px;
+      border-radius: 6px;
+      box-shadow: 0px 0px 10px rgba(0, 162, 255, 0.5);
+    }
+    input, button {
+      width: 100%;
+      padding: 8px;
+      margin-top: 8px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      color: white;
+    }
+    input {
+      background: rgba(0, 0, 50, 0.8);
+      text-align: center;
+      outline: none;
+      border: 1px solid #00ccff;
+    }
+    button {
+      background: #00ccff;
+      color: black;
+      font-weight: bold;
+      cursor: pointer;
+      transition: 0.3s;
+    }
+    button:hover {
+      background: #0088cc;
+    }
+    /* Mod Circle */
+    .mod-circle {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: #444;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      cursor: pointer;
+      font-weight: bold;
+      color: white;
+      z-index: 50;
+    }
+    /* Mod Toolbar */
+    #mod-toolbar {
+      position: absolute;
+      top: 60px;
+      left: 10px;
+      z-index: 51;
+      display: none;
+      flex-direction: column;
+    }
+    #mod-toolbar button {
+      margin-top: 5px;
+      padding: 5px 10px;
+      background: #00ccff;
+      border: none;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    /* Online Users Panel */
+    #online-users-panel {
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: 200px;
+      height: 100%;
+      background: rgba(0, 0, 50, 0.8);
+      color: white;
+      overflow-y: auto;
+      padding: 10px;
+      box-shadow: -2px 0 5px rgba(0,0,0,0.5);
+      z-index: 60;
+    }
+    #online-users-panel h3 {
+      text-align: center;
+    }
+    #online-users-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    #online-users-list li {
+      margin-bottom: 5px;
+      padding: 5px;
+      border-bottom: 1px solid #00ccff;
+    }
+    /* Shared Drawing Canvas */
+    #drawing-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 20;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="stars"></div>
+  
+  <!-- Shared Drawing Canvas -->
+  <canvas id="drawing-canvas"></canvas>
+  
+  <!-- Online Users Panel -->
+  <div id="online-users-panel">
+    <h3>Online Users</h3>
+    <ul id="online-users-list"></ul>
+  </div>
+  
+  <!-- Mod Circle -->
+  <div class="mod-circle" onclick="enterModPassword()">?</div>
+  
+  <!-- Mod Toolbar (visible only for mods) -->
+  <div id="mod-toolbar">
+    <button id="toggle-draw-btn">Toggle Draw</button>
+    <button id="clear-board-btn">Clear Board</button>
+    <button id="show-ip-btn">Show IP</button>
+    <button id="kick-user-btn">Kick User</button>
+    <button id="popup-btn">Popup</button>
+    <button id="manage-mod-btn">Manage Mods</button>
+    <button id="clear-chat-btn">Clear Chat</button>
+    <button id="toggle-mute-btn">Mute/Unmute User</button>
+    <button id="toggle-starfield-btn">Toggle Starfield</button>
+    <button id="highlight-msg-btn">Highlight Message</button>
+    <button id="send-user-alert-btn">User Alert</button>
+  </div>
+  
+  <!-- Mod Manager Modal -->
+  <div id="mod-manager-modal" class="modal">
+    <h3>Online Users</h3>
+    <div id="mod-manager-list"></div>
+    <button class="close-btn" id="close-mod-manager">Close</button>
+  </div>
+  
+  <!-- User Alert Modal -->
+  <div id="user-alert-modal" class="modal">
+    <h3>Send User Alert</h3>
+    <select id="user-alert-select">
+      <option value="">Select a user</option>
+    </select>
+    <input type="text" id="user-alert-message" placeholder="Enter alert message">
+    <button id="send-alert-btn">Send Alert</button>
+    <button class="close-btn" id="close-user-alert-modal">Close</button>
+  </div>
+  
+  <!-- Login Screen -->
+  <div class="login-screen">
+    <h2>🚀 Enter your name</h2>
+    <input type="text" id="nameInput" placeholder="Enter name">
+    <button onclick="enterChat()">Join Chat</button>
+  </div>
+
+  <!-- Chat UI -->
+  <div class="chat-container">
+    <h2>Cool Chat</h2>
+    <div id="chat-box"></div>
+    <input type="text" id="message" placeholder="Type a message">
+    <input type="text" id="image-url" placeholder="Paste image URL (optional)">
+    <button id="send-btn">Send</button>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-app.js";
+    import { getDatabase, ref, push, onChildAdded, onChildRemoved, remove, get, set, onValue, update, onDisconnect } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-database.js";
+
+    // Firebase configuration
+    const firebaseConfig = { 
+      apiKey: "AIzaSyDwcyVLkxgkW1-iN9Cf6uwJZZxZuGmyRmw",
+      authDomain: "james-bbd44.firebaseapp.com",
+      databaseURL: "https://james-bbd44-default-rtdb.firebaseio.com/",
+      projectId: "james-bbd44",
+      storageBucket: "james-bbd44.appspot.com",
+      messagingSenderId: "701037321981",
+      appId: "1:701037321981:web:bf893b77a1ed8278732894",
+      measurementId: "G-75Y1ES84HG"
+    };
+    
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    let username = "";
+    let userIP = "";
+    let isMod = false;
+    const mutedUsers = new Set();
+
+    // Drawing variables
+    const canvas = document.getElementById("drawing-canvas");
+    const ctx = canvas.getContext("2d");
+    let drawMode = false;
+    let isDrawing = false;
+    let lastX = 0;
+    let lastY = 0;
+
+    // Resize canvas
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    // Get UI elements
+    const modToolbar = document.getElementById("mod-toolbar");
+    const modManagerModal = document.getElementById("mod-manager-modal");
+    const modManagerList = document.getElementById("mod-manager-list");
+    const userAlertModal = document.getElementById("user-alert-modal");
+    const userAlertSelect = document.getElementById("user-alert-select");
+    const userAlertMessage = document.getElementById("user-alert-message");
+    const onlineUsersList = document.getElementById("online-users-list");
+
+    // Utility: Generate a random IP address (simulated)
+    function generateRandomIP() {
+      return "192.168." + Math.floor(Math.random() * 256) + "." + Math.floor(Math.random() * 256);
+    }
+
+    // Utility: Compute SHA-256 hash of a given string
+    async function hashPassword(password) {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(password);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      return hashHex;
+    }
+
+    // Listen for targeted user alerts
+    function listenForUserPopups() {
+      onChildAdded(ref(db, "userPopups/" + username), (snapshot) => {
+        const data = snapshot.val();
+        showPopup(data.text);
+        remove(ref(db, "userPopups/" + username + "/" + snapshot.key));
+      });
+    }
+
+    // Update Online Users Panel based on heartbeat (lastActive)
+    onValue(ref(db, "users"), (snapshot) => {
+      onlineUsersList.innerHTML = "";
+      const now = Date.now();
+      // Threshold set to 2 minutes (120,000 ms)
+      const threshold = 120000;
+      snapshot.forEach(childSnap => {
+        const userData = childSnap.val();
+        if(userData.lastActive && (now - userData.lastActive) < threshold) {
+          const li = document.createElement("li");
+          li.textContent = childSnap.key;
+          onlineUsersList.appendChild(li);
+        }
+      });
+    });
+
+    // When joining chat
+    window.enterChat = function() {
+      username = document.getElementById("nameInput").value.trim();
+      if (!username) return alert("Enter a name!");
+      userIP = generateRandomIP();
+      const userRef = ref(db, "users/" + username);
+      // Set initial user record with lastActive timestamp
+      set(userRef, { ip: userIP, isMod: false, lastActive: Date.now() });
+      onDisconnect(userRef).remove();
+      
+      if ("Notification" in window) {
+        Notification.requestPermission();
+      }
+      
+      onValue(ref(db, "users/" + username), (snapshot) => {
+        if (!snapshot.exists()) {
+          alert("You have been kicked!");
+          document.getElementById("message").disabled = true;
+          document.getElementById("send-btn").disabled = true;
+        } else {
+          const data = snapshot.val();
+          if(data.isMod && !isMod) {
+            isMod = true;
+            document.querySelector(".mod-circle").textContent = "MOD";
+            document.querySelector(".mod-circle").style.background = "#00ccff";
+            modToolbar.style.display = "flex";
+            alert("You have been granted mod capabilities!");
+          } else if (!data.isMod && isMod) {
+            isMod = false;
+            document.querySelector(".mod-circle").textContent = "?";
+            document.querySelector(".mod-circle").style.background = "#444";
+            modToolbar.style.display = "none";
+            alert("Your mod privileges have been revoked.");
+          }
+        }
+      });
+
+      document.querySelector(".login-screen").style.display = "none";
+      document.querySelector(".chat-container").style.display = "block";
+      push(ref(db, "messages"), { user: "System", text: `${username} has joined the chat`, system: true });
+      listenForUserPopups();
+
+      // Start heartbeat updates every minute
+      setInterval(() => {
+        update(ref(db, "users/" + username), { lastActive: Date.now() });
+      }, 60000);
+    };
+
+    // Enable mod mode with hashed password comparison
+    window.enterModPassword = async function() {
+      const password = prompt("Enter mod password:");
+      if (!password) return;
+      const hashedInput = await hashPassword(password);
+      const correctHash = "6aa2c6373181f0db1400bb704c7dbcb60f0d66fdd511cf5c080a8530728e6e91";
+      if (hashedInput === correctHash) {
+        isMod = true;
+        document.querySelector(".mod-circle").textContent = "MOD";
+        document.querySelector(".mod-circle").style.background = "#00ccff";
+        alert("Mod mode enabled!");
+        modToolbar.style.display = "flex";
+        update(ref(db, "users/" + username), { isMod: true });
+      } else {
+        alert("Incorrect password.");
+      }
+    };
+
+    // Send chat messages
+    document.getElementById("send-btn").addEventListener("click", function () {
+      const message = document.getElementById("message").value.trim();
+      const imageUrl = document.getElementById("image-url").value.trim();
+      if (!message && !imageUrl) return;
+      push(ref(db, "messages"), { user: username, text: message || null, imageUrl: imageUrl || null, ip: userIP });
+      document.getElementById("message").value = "";
+      document.getElementById("image-url").value = "";
+    });
+
+    // Listen for new chat messages
+    onChildAdded(ref(db, "messages"), (snapshot) => {
+      const chatBox = document.getElementById("chat-box");
+      const msgData = snapshot.val();
+      if (mutedUsers.has(msgData.user)) return;
+      const msgElement = document.createElement("div");
+      msgElement.id = "msg-" + snapshot.key;
+      msgElement.classList.add(msgData.system ? "system-message" : "message");
+      msgElement.innerHTML = `<strong>${msgData.user}:</strong> ${msgData.text || ""}`;
+      if (msgData.imageUrl) msgElement.innerHTML += `<br><img src="${msgData.imageUrl}" alt="Image">`;
+      if (isMod && !msgData.system) {
+        const delBtn = document.createElement("button");
+        delBtn.textContent = "Delete";
+        delBtn.style.marginLeft = "10px";
+        delBtn.addEventListener("click", function() {
+          if(confirm("Are you sure you want to delete this message?")) {
+            remove(ref(db, "messages/" + snapshot.key));
+          }
+        });
+        msgElement.appendChild(delBtn);
+      }
+      chatBox.appendChild(msgElement);
+      chatBox.scrollTop = chatBox.scrollHeight;
+      
+      if ("Notification" in window && Notification.permission === "granted" && msgData.user !== username) {
+        new Notification(`Message from ${msgData.user}`, { body: msgData.text || "Image message" });
+      }
+    });
+
+    onChildRemoved(ref(db, "messages"), (snapshot) => {
+      const msgElement = document.getElementById("msg-" + snapshot.key);
+      if (msgElement) {
+        msgElement.remove();
+      }
+    });
+
+    // Mod toolbar functions
+    document.getElementById("toggle-draw-btn").addEventListener("click", function(){
+      drawMode = !drawMode;
+      if (drawMode) {
+        canvas.style.pointerEvents = "auto";
+        this.textContent = "Stop Draw";
+        alert("Draw mode enabled. Use your mouse to draw in white.");
+      } else {
+        canvas.style.pointerEvents = "none";
+        this.textContent = "Toggle Draw";
+        alert("Draw mode disabled.");
+      }
+    });
+    document.getElementById("clear-board-btn").addEventListener("click", function(){
+      remove(ref(db, "drawings"));
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    });
+    document.getElementById("show-ip-btn").addEventListener("click", function(){
+      const targetUser = prompt("Enter username to show IP:");
+      if(targetUser) {
+        get(ref(db, "users/" + targetUser)).then((snapshot) => {
+          if(snapshot.exists()){
+            alert(targetUser + "'s IP: " + snapshot.val().ip);
+          } else {
+            alert("User not found or kicked.");
+          }
+        });
+      }
+    });
+    document.getElementById("kick-user-btn").addEventListener("click", function(){
+      const targetUser = prompt("Enter username to kick:");
+      if(targetUser) {
+        remove(ref(db, "users/" + targetUser)).then(() => {
+          push(ref(db, "messages"), { user: "System", text: `${targetUser} was kicked by ${username}`, system: true });
+          alert(targetUser + " has been kicked.");
+        });
+      }
+    });
+    document.getElementById("popup-btn").addEventListener("click", function(){
+      const popupMsg = prompt("Enter popup message:");
+      if(popupMsg) {
+        push(ref(db, "popups"), { text: popupMsg, timestamp: Date.now() });
+      }
+    });
+    document.getElementById("manage-mod-btn").addEventListener("click", function(){
+      openModManager();
+    });
+    document.getElementById("clear-chat-btn").addEventListener("click", function(){
+      if(confirm("Are you sure you want to clear the chat? This will remove all messages.")) {
+        remove(ref(db, "messages")).then(() => {
+          document.getElementById("chat-box").innerHTML = "";
+          alert("Chat has been cleared.");
+        });
+      }
+    });
+    document.getElementById("toggle-mute-btn").addEventListener("click", function(){
+      const targetUser = prompt("Enter username to toggle mute:");
+      if(targetUser) {
+        if(mutedUsers.has(targetUser)) {
+          mutedUsers.delete(targetUser);
+          alert(targetUser + " has been unmuted.");
+        } else {
+          mutedUsers.add(targetUser);
+          alert(targetUser + " has been muted. Their new messages won't show.");
+          const chatBox = document.getElementById("chat-box");
+          [...chatBox.children].forEach(msg => {
+            if(msg.innerHTML.includes(`<strong>${targetUser}:</strong>`)){
+              msg.style.display = "none";
+            }
+          });
+        }
+      }
+    });
+    document.getElementById("toggle-starfield-btn").addEventListener("click", function(){
+      const starsElem = document.querySelector(".stars");
+      starsElem.style.display = (starsElem.style.display === "none") ? "block" : "none";
+    });
+    document.getElementById("highlight-msg-btn").addEventListener("click", function(){
+      const msgId = prompt("Enter message ID to highlight:");
+      if(msgId) {
+        const msgElement = document.getElementById("msg-" + msgId);
+        if(msgElement) {
+          msgElement.classList.add("highlight");
+          alert("Message " + msgId + " has been highlighted.");
+        } else {
+          alert("Message not found.");
+        }
+      }
+    });
+    document.getElementById("send-user-alert-btn").addEventListener("click", function(){
+      openUserAlertModal();
+    });
+
+    // Mod Manager Modal functions
+    function openModManager() {
+      modManagerModal.style.display = "block";
+      refreshModManager();
+    }
+    function refreshModManager() {
+      modManagerList.innerHTML = "";
+      get(ref(db, "users")).then((snapshot) => {
+        snapshot.forEach(childSnap => {
+          const userData = childSnap.val();
+          const userName = childSnap.key;
+          const userIP = userData.ip;
+          const isUserMod = userData.isMod;
+          const row = document.createElement("div");
+          row.classList.add("user-row");
+          row.innerHTML = `<span>${userName} (${userIP})</span>`;
+          const toggleBtn = document.createElement("button");
+          toggleBtn.textContent = isUserMod ? "Remove Mod" : "Give Mod";
+          toggleBtn.addEventListener("click", () => {
+            update(ref(db, "users/" + userName), { isMod: !isUserMod })
+            .then(() => {
+              alert(userName + " is now " + (!isUserMod ? "a mod" : "not a mod") + ".");
+              refreshModManager();
+            });
+          });
+          row.appendChild(toggleBtn);
+          modManagerList.appendChild(row);
+        });
+      });
+    }
+    document.getElementById("close-mod-manager").addEventListener("click", function(){
+      modManagerModal.style.display = "none";
+    });
+
+    // User Alert Modal functions
+    function openUserAlertModal() {
+      userAlertSelect.innerHTML = "<option value=''>Select a user</option>";
+      get(ref(db, "users")).then((snapshot) => {
+        snapshot.forEach(childSnap => {
+          const userName = childSnap.key;
+          const option = document.createElement("option");
+          option.value = userName;
+          option.textContent = userName;
+          userAlertSelect.appendChild(option);
+        });
+      });
+      userAlertMessage.value = "";
+      userAlertModal.style.display = "block";
+    }
+    document.getElementById("close-user-alert-modal").addEventListener("click", function(){
+      userAlertModal.style.display = "none";
+    });
+    document.getElementById("send-alert-btn").addEventListener("click", function(){
+      const targetUser = userAlertSelect.value;
+      const alertMsg = userAlertMessage.value.trim();
+      if (!targetUser) {
+        return alert("Please select a user.");
+      }
+      if (!alertMsg) {
+        return alert("Please enter an alert message.");
+      }
+      push(ref(db, "userPopups/" + targetUser), { text: alertMsg, timestamp: Date.now() })
+      .then(() => {
+        alert("Alert sent to " + targetUser);
+        userAlertModal.style.display = "none";
+      });
+    });
+
+    // Canvas drawing event listeners
+    canvas.addEventListener("mousedown", (e) => {
+      if (!isMod || !drawMode) return;
+      isDrawing = true;
+      lastX = e.clientX;
+      lastY = e.clientY;
+    });
+    canvas.addEventListener("mousemove", (e) => {
+      if (!isMod || !drawMode || !isDrawing) return;
+      const x = e.clientX;
+      const y = e.clientY;
+      ctx.strokeStyle = "white";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(lastX, lastY);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      push(ref(db, "drawings"), { x1: lastX, y1: lastY, x2: x, y2: y });
+      lastX = x;
+      lastY = y;
+    });
+    canvas.addEventListener("mouseup", () => {
+      if (!isMod || !drawMode) return;
+      isDrawing = false;
+    });
+    canvas.addEventListener("mouseleave", () => {
+      if (!isMod || !drawMode) return;
+      isDrawing = false;
+    });
+
+    onChildAdded(ref(db, "drawings"), (snapshot) => {
+      const data = snapshot.val();
+      ctx.strokeStyle = "white";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(data.x1, data.y1);
+      ctx.lineTo(data.x2, data.y2);
+      ctx.stroke();
+    });
+    onChildRemoved(ref(db, "drawings"), (snapshot) => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      get(ref(db, "drawings")).then((snap) => {
+        snap.forEach(childSnap => {
+          const d = childSnap.val();
+          ctx.beginPath();
+          ctx.moveTo(d.x1, d.y1);
+          ctx.lineTo(d.x2, d.y2);
+          ctx.stroke();
+        });
+      });
+    });
+
+    onChildAdded(ref(db, "popups"), (snapshot) => {
+      const data = snapshot.val();
+      showPopup(data.text);
+      remove(ref(db, "popups/" + snapshot.key));
+    });
+
+    function showPopup(message) {
+      const popup = document.createElement("div");
+      popup.classList.add("popup");
+      popup.innerText = message;
+      document.body.appendChild(popup);
+      setTimeout(() => {
+        popup.remove();
+      }, 5000);
+    }
+  </script>
+</body>
+</html>
