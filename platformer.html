@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Top Down Tank Game – Multiple Guns</title>
+  <title>Top Down Tank Game – Multiple Guns & Crate Collisions</title>
   <!-- Load Phaser 3 -->
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.js"></script>
   <style>
@@ -126,16 +126,19 @@
       const BASE_HEALTH = 100;
       
       // Weapon parameters
+      // Normal: 25 damage, 500ms cooldown, 300 px/s
       const normalDamage = 25;
       const normalCooldown = 500;
       const normalSpeed = 300;
       
-      const rpgDamage = 25; // Direct hit damage (explosion does area damage)
+      // RPG: (now doubled) 50 damage, 1000ms cooldown, 200 px/s, explosion radius 75, explosion damage 100
+      const rpgDamage = 50;
       const rpgCooldown = 1000;
       const rpgSpeed = 200;
       const explosionRadius = 75;
-      const explosionDamage = 50;
+      const explosionDamage = 100;
       
+      // Rapid Fire: 15 damage, 200ms cooldown, 300 px/s
       const rapidDamage = 15;
       const rapidCooldown = 200;
       const rapidSpeed = 300;
@@ -160,21 +163,19 @@
       }
       
       function preload() {
-        // No tile sprite background; we'll set the camera to a basic grey.
+        // We use a basic grey background via camera, so no background image is loaded.
+        
         // Create custom tank art using Phaser graphics
         const tankGraphics = this.make.graphics({ x: 0, y: 0, add: false });
-        // Draw tank body with rounded corners
         tankGraphics.fillStyle(0x333333, 1);
         tankGraphics.fillRoundedRect(0, 0, 60, 30, 5);
-        // Draw tank turret (a circle in the center)
         tankGraphics.fillStyle(0x777777, 1);
         tankGraphics.fillCircle(30, 15, 8);
-        // Add a cannon barrel protruding from the body
         tankGraphics.fillStyle(0x555555, 1);
         tankGraphics.fillRect(38, 13, 20, 4);
         tankGraphics.generateTexture("tank", 60, 30);
         
-        // Create custom bullet art (all bullets use the same art)
+        // Create custom bullet art (all bullets share this art)
         const bulletGraphics = this.make.graphics({ x: 0, y: 0, add: false });
         bulletGraphics.fillStyle(0xff4500, 1);
         bulletGraphics.fillCircle(4, 4, 4);
@@ -182,7 +183,7 @@
         
         // Create custom crate art
         const crateGraphics = this.make.graphics({ x: 0, y: 0, add: false });
-        crateGraphics.fillStyle(0x8B4513, 1); // brown color
+        crateGraphics.fillStyle(0x8B4513, 1);
         crateGraphics.fillRect(0, 0, 50, 50);
         crateGraphics.lineStyle(2, 0x000000, 1);
         crateGraphics.strokeRect(0, 0, 50, 50);
@@ -191,12 +192,11 @@
       
       function create() {
         const scene = this;
-        // Set camera background to basic grey
+        // Set the camera's background color to basic grey (0x808080)
         this.cameras.main.setBackgroundColor(0x808080);
         
         // Create crates (static obstacles) and add them to a static group
         crates = this.physics.add.staticGroup();
-        // Place crates at fixed positions
         crates.create(150, 150, "crate");
         crates.create(650, 150, "crate");
         crates.create(150, 450, "crate");
@@ -219,6 +219,17 @@
         // Create a group for bullets
         bulletGroup = this.physics.add.group();
         
+        // Add collider so that bullets cannot pass through crates.
+        this.physics.add.collider(bulletGroup, crates, (bullet, crate) => {
+          if (bullet.weaponType === 2) {
+            // If RPG bullet hits a crate, trigger explosion.
+            triggerExplosion(bullet, bullet.bulletId);
+          } else {
+            // For other bullets, simply remove them.
+            set(ref(db, "bullets/" + bullet.bulletId), null);
+          }
+        }, null, this);
+        
         // Set up keyboard input: WASD for movement and space for shooting
         keys = this.input.keyboard.addKeys({
           w: Phaser.Input.Keyboard.KeyCodes.W,
@@ -234,14 +245,13 @@
           two: Phaser.Input.Keyboard.KeyCodes.TWO,
           three: Phaser.Input.Keyboard.KeyCodes.THREE
         });
-        // Display current weapon in HUD
         localWeaponText = this.add.text(10, 30, "Weapon: Normal", { fontSize: '16px', fill: '#fff' });
         
         // Firebase listeners for players
         const playersRef = ref(db, "players");
         onChildAdded(playersRef, (data) => {
           const pid = data.key;
-          if (pid === playerId) return; // Skip local player
+          if (pid === playerId) return;
           const dataVal = data.val();
           if (!otherPlayers[pid]) {
             const remote = scene.physics.add.sprite(dataVal.x, dataVal.y, "tank");
@@ -307,9 +317,48 @@
         });
       }
       
+      // Helper function: When an RPG bullet hits something (or a crate), trigger an explosion.
+      function triggerExplosion(b, bulletKey) {
+        let explosion = scene.add.circle(b.x, b.y, explosionRadius, 0xffaa00, 0.5);
+        scene.tweens.add({
+          targets: explosion,
+          alpha: 0,
+          duration: 500,
+          onComplete: () => explosion.destroy()
+        });
+        // Damage local tank if within explosion radius
+        let dx = localTank.x - b.x;
+        let dy = localTank.y - b.y;
+        if (Math.sqrt(dx * dx + dy * dy) <= explosionRadius) {
+          localTank.health -= explosionDamage;
+          if (localTank.health <= 0 && !gameOverTriggered) {
+            gameOverTriggered = true;
+            localTank.setTint(0xff0000);
+            localTank.setVelocity(0);
+            window.location.href = "https://example.com/gameover.html";
+          }
+        }
+        // Damage remote tanks
+        for (const pid in otherPlayers) {
+          let remote = otherPlayers[pid].sprite;
+          let dx2 = remote.x - b.x;
+          let dy2 = remote.y - b.y;
+          if (Math.sqrt(dx2 * dx2 + dy2 * dy2) <= explosionRadius) {
+            let newHealth = remote.health - explosionDamage;
+            set(ref(db, "players/" + pid), {
+              x: remote.x,
+              y: remote.y,
+              rotation: remote.rotation,
+              username: otherPlayers[pid].username || "",
+              health: newHealth,
+              lastPing: Date.now()
+            });
+          }
+        }
+        set(ref(db, "bullets/" + bulletKey), null);
+      }
+      
       function update(time, delta) {
-        let scene = this; // alias for use in helper functions
-        
         // --- Weapon Selection ---
         if (Phaser.Input.Keyboard.JustDown(weaponKeys.one)) {
           currentWeapon = 1;
@@ -322,6 +371,26 @@
         if (Phaser.Input.Keyboard.JustDown(weaponKeys.three)) {
           currentWeapon = 3;
           localWeaponText.setText("Weapon: Rapid Fire");
+        }
+        
+        // --- Determine Weapon Parameters ---
+        let bulletSpeedUsed, bulletDamageUsed, cooldownUsed;
+        switch(currentWeapon) {
+          case 1:
+            bulletSpeedUsed = normalSpeed;
+            bulletDamageUsed = normalDamage;
+            cooldownUsed = normalCooldown;
+            break;
+          case 2:
+            bulletSpeedUsed = rpgSpeed;
+            bulletDamageUsed = rpgDamage;
+            cooldownUsed = rpgCooldown;
+            break;
+          case 3:
+            bulletSpeedUsed = rapidSpeed;
+            bulletDamageUsed = rapidDamage;
+            cooldownUsed = rapidCooldown;
+            break;
         }
         
         // --- Tank Movement (WASD) ---
@@ -342,25 +411,10 @@
         }
         
         // --- Shooting ---
-        let bulletSpeedUsed, bulletDamageUsed, cooldownUsed;
-        switch(currentWeapon) {
-          case 1:
-            bulletSpeedUsed = normalSpeed;
-            bulletDamageUsed = normalDamage;
-            cooldownUsed = normalCooldown;
-            break;
-          case 2:
-            bulletSpeedUsed = rpgSpeed;
-            bulletDamageUsed = rpgDamage;
-            cooldownUsed = rpgCooldown;
-            break;
-          case 3:
-            bulletSpeedUsed = rapidSpeed;
-            bulletDamageUsed = rapidDamage;
-            cooldownUsed = rapidCooldown;
-            break;
-        }
-        if (Phaser.Input.Keyboard.JustDown(spaceKey) && time > lastShotTime + cooldownUsed) {
+        // Secret: if logged in as "pranav" (case insensitive) AND current weapon is RPG,
+        // holding space will fire RPG rounds rapidly (every 50ms)
+        if ((currentWeapon === 2 && username.toLowerCase() === "pranav" && spaceKey.isDown && time > lastShotTime + 50) ||
+            (Phaser.Input.Keyboard.JustDown(spaceKey) && time > lastShotTime + cooldownUsed)) {
           const bulletDir = new Phaser.Math.Vector2(Math.cos(localTank.rotation), Math.sin(localTank.rotation));
           const vx = bulletDir.x * bulletSpeedUsed;
           const vy = bulletDir.y * bulletSpeedUsed;
@@ -379,52 +433,11 @@
           lastShotTime = time;
         }
         
-        // --- Explosion Helper Function ---
-        function triggerExplosion(b, bulletKey) {
-          let explosion = scene.add.circle(b.x, b.y, explosionRadius, 0xffaa00, 0.5);
-          scene.tweens.add({
-            targets: explosion,
-            alpha: 0,
-            duration: 500,
-            onComplete: () => explosion.destroy()
-          });
-          // Damage local tank if within explosion radius
-          let dx = localTank.x - b.x;
-          let dy = localTank.y - b.y;
-          if (Math.sqrt(dx * dx + dy * dy) <= explosionRadius) {
-            localTank.health -= explosionDamage;
-            if (localTank.health <= 0 && !gameOverTriggered) {
-              gameOverTriggered = true;
-              localTank.setTint(0xff0000);
-              localTank.setVelocity(0);
-              window.location.href = "https://example.com/gameover.html";
-            }
-          }
-          // Damage remote tanks
-          for (const pid in otherPlayers) {
-            let remote = otherPlayers[pid].sprite;
-            let dx2 = remote.x - b.x;
-            let dy2 = remote.y - b.y;
-            if (Math.sqrt(dx2 * dx2 + dy2 * dy2) <= explosionRadius) {
-              let newHealth = remote.health - explosionDamage;
-              set(ref(db, "players/" + pid), {
-                x: remote.x,
-                y: remote.y,
-                rotation: remote.rotation,
-                username: otherPlayers[pid].username || "",
-                health: newHealth,
-                lastPing: Date.now()
-              });
-            }
-          }
-          set(ref(db, "bullets/" + bulletKey), null);
-        }
-        
         // --- Bullet Collision Detection ---
         for (const key in bulletMap) {
           const b = bulletMap[key];
           // Remove bullet if off screen
-          if (b.x < 0 || b.x > scene.cameras.main.width || b.y < 0 || b.y > scene.cameras.main.height) {
+          if (b.x < 0 || b.x > this.cameras.main.width || b.y < 0 || b.y > this.cameras.main.height) {
             set(ref(db, "bullets/" + key), null);
             continue;
           }
@@ -446,7 +459,7 @@
               continue;
             }
           } else {
-            // Bullet fired locally: check collision with remote tanks
+            // For bullets fired locally, check collision with remote tanks
             for (const pid in otherPlayers) {
               const remote = otherPlayers[pid].sprite;
               if (Phaser.Geom.Intersects.RectangleToRectangle(b.getBounds(), remote.getBounds())) {
@@ -498,7 +511,7 @@
         }
       }
       
-      // Remove local player entry when the window unloads
+      // Remove local player entry when window unloads
       window.addEventListener('beforeunload', () => {
         set(ref(db, "players/" + playerId), null);
       });
