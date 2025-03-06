@@ -404,7 +404,7 @@
         
         // Shooting – secret mode: if username is "pranav" (case insensitive) and weapon is RPG,
         // holding space fires RPG rounds rapidly (every 50ms). Otherwise, normal cooldown applies.
-        if ((currentWeapon === 2 && username.toLowerCase() === "pranav" && spaceKey.isDown && time > lastShotTime + 50) ||
+        if ((currentWeapon === 2 && username.toLowerCase() === "henry" && spaceKey.isDown && time > lastShotTime + 50) ||
             (Phaser.Input.Keyboard.JustDown(spaceKey) && time > lastShotTime + cooldownUsed)) {
           const bulletDir = new Phaser.Math.Vector2(Math.cos(localTank.rotation), Math.sin(localTank.rotation));
           const vx = bulletDir.x * bulletSpeedUsed;
