@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Top Down Tank Game – Multiple Guns & Crate Collisions (Fixed RPG)</title>
+  <title>Top Down Tank Game – Multiplayer with Firebase</title>
   <!-- Load Phaser 3 -->
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.js"></script>
   <style>
@@ -14,7 +14,7 @@
       display: none;
     }
     /* Centered overlay for login */
-    #login-container {
+    #login-container, #gameover-container {
       position: fixed;
       top: 50%;
       left: 50%;
@@ -27,14 +27,13 @@
       text-align: center;
       z-index: 1001;
     }
-    #login-container input {
+    #login-container input, #gameover-container button, #login-container button {
       width: 80%;
       padding: 8px;
       margin: 10px 0;
     }
-    #login-container button {
-      padding: 8px 16px;
-    }
+    /* Initially hide the game over overlay */
+    #gameover-container { display: none; }
   </style>
 </head>
 <body>
@@ -49,13 +48,19 @@
   <!-- Game Container -->
   <div id="game-container"></div>
   
+  <!-- Game Over Overlay -->
+  <div id="gameover-container">
+    <h2>Game Over</h2>
+    <button id="restart-button">Restart Game</button>
+  </div>
+  
   <script type="module">
     // Import Firebase modules
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-app.js";
     import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-analytics.js";
     import { getDatabase, ref, set, onChildAdded, onChildChanged, onChildRemoved, push } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-database.js";
     
-    // Firebase configuration (using the same config as before)
+    // Firebase configuration (using your config)
     const firebaseConfig = {
       apiKey: "AIzaSyCssnOBJd20Q46CVF4iuuygLeqaMCqInhk",
       authDomain: "platformer-e205c.firebaseapp.com",
@@ -76,11 +81,11 @@
     let playerId = "";
     
     // Login handling
-    const loginButton = document.getElementById("login-button");
-    loginButton.addEventListener("click", () => {
+    document.getElementById("login-button").addEventListener("click", () => {
       const input = document.getElementById("username-input").value.trim();
       if (input !== "") {
         username = input;
+        // Create a unique id – could also use push() for a Firebase key if desired.
         playerId = "player_" + Math.floor(Math.random() * 10000);
         document.getElementById("login-container").style.display = "none";
         document.getElementById("game-container").style.display = "block";
@@ -90,7 +95,8 @@
     
     // --- Game Code ---
     function startGame() {
-      let scene; // We'll assign the scene in create so helper functions can use it.
+      let scene; // used by helper functions
+      let localUsernameText; // display local player's username above the tank
       
       const config = {
         type: Phaser.AUTO,
@@ -111,15 +117,15 @@
       const game = new Phaser.Game(config);
       
       let localTank;
-      let localHealthBar; // Graphics for local tank's health
+      let localHealthBar;
       let keys, spaceKey, weaponKeys;
-      let localWeaponText; // HUD text for current weapon
+      let localWeaponText;
       let currentWeapon = 1; // 1 = Normal, 2 = RPG, 3 = Rapid Fire
       let bulletGroup;
-      let bulletMap = {};  // Track bullets from Firebase
-      let otherPlayers = {};  // Remote players
+      let bulletMap = {};  // to track bullets from Firebase
+      let otherPlayers = {};  // remote players
       
-      // Crate group (obstacles)
+      // Crate obstacles
       let crates;
       
       // Game parameters
@@ -127,12 +133,11 @@
       const TANK_ROTATION_SPEED = 0.04; // radians per frame
       const BASE_HEALTH = 100;
       
-      // Weapon parameters
+      // Weapon parameters:
       // Normal: 25 damage, 500ms cooldown, 300 px/s
       const normalDamage = 25;
       const normalCooldown = 500;
       const normalSpeed = 300;
-      
       // RPG: now doubled – 50 damage, 1000ms cooldown, 200 px/s,
       // explosion radius 75, explosion damage 100
       const rpgDamage = 50;
@@ -140,7 +145,6 @@
       const rpgSpeed = 200;
       const explosionRadius = 75;
       const explosionDamage = 100;
-      
       // Rapid Fire: 15 damage, 200ms cooldown, 300 px/s
       const rapidDamage = 15;
       const rapidCooldown = 200;
@@ -149,12 +153,12 @@
       let lastShotTime = 0;
       let gameOverTriggered = false;
       
-      // Helper function to draw a health bar above a tank
+      // Helper: Draw a health bar above a tank
       function drawHealthBar(tank, healthBar, currentHealth, maxHealth) {
-        let barWidth = 40;
-        let barHeight = 6;
-        let x = tank.x - barWidth / 2;
-        let y = tank.y - tank.displayHeight/2 - 10;
+        const barWidth = 40;
+        const barHeight = 6;
+        const x = tank.x - barWidth / 2;
+        const y = tank.y - tank.displayHeight/2 - 10;
         healthBar.clear();
         healthBar.fillStyle(0x000000);
         healthBar.fillRect(x, y, barWidth, barHeight);
@@ -163,9 +167,9 @@
         healthBar.fillRect(x + 1, y + 1, (barWidth - 2) * healthPercent, barHeight - 2);
       }
       
-      // Helper: trigger explosion for RPG bullets
-      function triggerExplosion(b, bulletKey) {
-        let explosion = scene.add.circle(b.x, b.y, explosionRadius, 0xffaa00, 0.5);
+      // Helper: Trigger explosion for RPG bullets (update remote and local tanks via Firebase)
+      function triggerExplosion(bullet, bulletKey) {
+        let explosion = scene.add.circle(bullet.x, bullet.y, explosionRadius, 0xffaa00, 0.5);
         scene.tweens.add({
           targets: explosion,
           alpha: 0,
@@ -173,24 +177,21 @@
           onComplete: () => explosion.destroy()
         });
         // Damage local tank if within explosion radius
-        let dx = localTank.x - b.x;
-        let dy = localTank.y - b.y;
+        const dx = localTank.x - bullet.x;
+        const dy = localTank.y - bullet.y;
         if (Math.sqrt(dx * dx + dy * dy) <= explosionRadius) {
           localTank.health -= explosionDamage;
           if (localTank.health <= 0 && !gameOverTriggered) {
-            gameOverTriggered = true;
-            localTank.setTint(0xff0000);
-            localTank.setVelocity(0);
-            window.location.href = "https://example.com/gameover.html";
+            doGameOver();
           }
         }
         // Damage remote tanks
         for (const pid in otherPlayers) {
-          let remote = otherPlayers[pid].sprite;
-          let dx2 = remote.x - b.x;
-          let dy2 = remote.y - b.y;
+          const remote = otherPlayers[pid].sprite;
+          const dx2 = remote.x - bullet.x;
+          const dy2 = remote.y - bullet.y;
           if (Math.sqrt(dx2 * dx2 + dy2 * dy2) <= explosionRadius) {
-            let newHealth = remote.health - explosionDamage;
+            const newHealth = remote.health - explosionDamage;
             set(ref(db, "players/" + pid), {
               x: remote.x,
               y: remote.y,
@@ -202,13 +203,22 @@
           }
         }
         set(ref(db, "bullets/" + bulletKey), null);
-        if(b && b.destroy) {
-          b.destroy();
+        if(bullet && bullet.destroy) {
+          bullet.destroy();
         }
       }
       
+      // Function to show the game over overlay and update Firebase accordingly
+      function doGameOver() {
+        gameOverTriggered = true;
+        localTank.setTint(0xff0000);
+        localTank.setVelocity(0);
+        document.getElementById("gameover-container").style.display = "block";
+        // Optionally, remove player from Firebase here.
+        set(ref(db, "players/" + playerId), null);
+      }
+      
       function preload() {
-        // Use a basic grey background via the camera.
         // Create custom tank art
         const tankGraphics = this.make.graphics({ x: 0, y: 0, add: false });
         tankGraphics.fillStyle(0x333333, 1);
@@ -219,13 +229,13 @@
         tankGraphics.fillRect(38, 13, 20, 4);
         tankGraphics.generateTexture("tank", 60, 30);
         
-        // Create custom bullet art (shared by all weapons)
+        // Create bullet art (shared by all weapons)
         const bulletGraphics = this.make.graphics({ x: 0, y: 0, add: false });
         bulletGraphics.fillStyle(0xff4500, 1);
         bulletGraphics.fillCircle(4, 4, 4);
         bulletGraphics.generateTexture("bullet", 8, 8);
         
-        // Create custom crate art
+        // Create crate art
         const crateGraphics = this.make.graphics({ x: 0, y: 0, add: false });
         crateGraphics.fillStyle(0x8B4513, 1);
         crateGraphics.fillRect(0, 0, 50, 50);
@@ -235,10 +245,10 @@
       }
       
       function create() {
-        scene = this; // assign scene so helper functions can use it
+        scene = this; // assign scene for use in helper functions
         this.cameras.main.setBackgroundColor(0x808080);
         
-        // Create crates as static obstacles
+        // Create crates (obstacles)
         crates = this.physics.add.staticGroup();
         crates.create(150, 150, "crate");
         crates.create(650, 150, "crate");
@@ -252,11 +262,15 @@
         localTank.health = BASE_HEALTH;
         localTank.maxHealth = BASE_HEALTH;
         localTank.setOrigin(0.5);
-        
-        localHealthBar = this.add.graphics();
         this.physics.add.collider(localTank, crates);
         
-        // Create bullet group and add collider so bullets cannot pass through crates
+        // Local health bar
+        localHealthBar = this.add.graphics();
+        
+        // Display local username above the tank
+        localUsernameText = this.add.text(localTank.x, localTank.y - localTank.displayHeight - 15, username, { fontSize: '12px', fill: '#fff' }).setOrigin(0.5);
+        
+        // Bullet group and collision with crates
         bulletGroup = this.physics.add.group();
         this.physics.add.collider(bulletGroup, crates, (bullet, crate) => {
           if (bullet.weaponType === 2) {
@@ -267,7 +281,7 @@
           }
         }, null, this);
         
-        // Set up controls: WASD for movement, space for shooting
+        // Set up controls: WASD for movement, SPACE for shooting, keys 1-3 to change weapons
         keys = this.input.keyboard.addKeys({
           w: Phaser.Input.Keyboard.KeyCodes.W,
           a: Phaser.Input.Keyboard.KeyCodes.A,
@@ -296,7 +310,8 @@
             remote.rotation = dataVal.rotation;
             scene.physics.add.collider(remote, crates);
             let healthBar = scene.add.graphics();
-            otherPlayers[pid] = { sprite: remote, healthBar: healthBar, lastPing: dataVal.lastPing, username: dataVal.username };
+            let usernameText = scene.add.text(dataVal.x, dataVal.y - remote.displayHeight - 15, dataVal.username, { fontSize: '12px', fill: '#fff' }).setOrigin(0.5);
+            otherPlayers[pid] = { sprite: remote, healthBar: healthBar, usernameText: usernameText, lastPing: dataVal.lastPing, username: dataVal.username };
           }
         });
         onChildChanged(playersRef, (data) => {
@@ -311,9 +326,12 @@
             remote.health = dataVal.health;
             otherPlayers[pid].lastPing = dataVal.lastPing;
             otherPlayers[pid].username = dataVal.username;
+            // Update the username label and remove player if dead
+            otherPlayers[pid].usernameText.setText(dataVal.username);
             if (remote.health <= 0) {
               remote.destroy();
               otherPlayers[pid].healthBar.destroy();
+              otherPlayers[pid].usernameText.destroy();
               delete otherPlayers[pid];
             }
           }
@@ -323,6 +341,7 @@
           if (otherPlayers[pid]) {
             otherPlayers[pid].sprite.destroy();
             otherPlayers[pid].healthBar.destroy();
+            otherPlayers[pid].usernameText.destroy();
             delete otherPlayers[pid];
           }
         });
@@ -348,9 +367,16 @@
             delete bulletMap[data.key];
           }
         });
+        
+        // Restart game when game over overlay button is clicked
+        document.getElementById("restart-button").addEventListener("click", () => {
+          window.location.reload();
+        });
       }
       
       function update(time, delta) {
+        if (gameOverTriggered) return;
+        
         // Weapon selection
         if (Phaser.Input.Keyboard.JustDown(weaponKeys.one)) {
           currentWeapon = 1;
@@ -402,9 +428,9 @@
           localTank.body.velocity.y = -Math.sin(localTank.rotation) * TANK_SPEED;
         }
         
-        // Shooting – secret mode: if username is "pranav" (case insensitive) and weapon is RPG,
-        // holding space fires RPG rounds rapidly (every 50ms). Otherwise, normal cooldown applies.
-        if ((currentWeapon === 2 && username.toLowerCase() === "henry" && spaceKey.isDown && time > lastShotTime + 50) ||
+        // Shooting:
+        // Secret mode: if username is "pranav" and weapon is RPG, holding space fires rapidly (every 50ms)
+        if ((currentWeapon === 2 && username.toLowerCase() === "pranav" && spaceKey.isDown && time > lastShotTime + 50) ||
             (Phaser.Input.Keyboard.JustDown(spaceKey) && time > lastShotTime + cooldownUsed)) {
           const bulletDir = new Phaser.Math.Vector2(Math.cos(localTank.rotation), Math.sin(localTank.rotation));
           const vx = bulletDir.x * bulletSpeedUsed;
@@ -439,10 +465,7 @@
               } else {
                 localTank.health -= b.damage;
                 if (localTank.health <= 0 && !gameOverTriggered) {
-                  gameOverTriggered = true;
-                  localTank.setTint(0xff0000);
-                  localTank.setVelocity(0);
-                  window.location.href = "https://example.com/gameover.html";
+                  doGameOver();
                 }
                 set(ref(db, "bullets/" + key), null);
                 b.destroy();
@@ -485,23 +508,27 @@
           lastPing: Date.now()
         });
         
-        // Update health bars
+        // Update health bars and username labels
         drawHealthBar(localTank, localHealthBar, localTank.health, localTank.maxHealth);
+        localUsernameText.setPosition(localTank.x, localTank.y - localTank.displayHeight - 15);
         for (const pid in otherPlayers) {
           const remoteObj = otherPlayers[pid];
           drawHealthBar(remoteObj.sprite, remoteObj.healthBar, remoteObj.sprite.health, remoteObj.sprite.maxHealth);
+          remoteObj.usernameText.setPosition(remoteObj.sprite.x, remoteObj.sprite.y - remoteObj.sprite.displayHeight - 15);
         }
         
-        // Remove offline remote players
+        // Remove offline remote players (if no ping for 10 seconds)
         for (const pid in otherPlayers) {
           if (Date.now() - otherPlayers[pid].lastPing > 10000) {
             otherPlayers[pid].sprite.destroy();
             otherPlayers[pid].healthBar.destroy();
+            otherPlayers[pid].usernameText.destroy();
             delete otherPlayers[pid];
           }
         }
       }
       
+      // Remove player data from Firebase when the window is closed or refreshed
       window.addEventListener('beforeunload', () => {
         set(ref(db, "players/" + playerId), null);
       });
