@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Top Down Tank Game – Multiplayer with RPG Explosions & Rapid Fire Shotgun</title>
+  <title>Top Down Tank Game – Multiplayer with Secret Shotgun RPG</title>
   <!-- Load Phaser 3 -->
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.js"></script>
   <style>
@@ -13,7 +13,7 @@
       height: 100vh;
       display: none;
     }
-    /* Centered overlays for login and game over */
+    /* Centered overlay for login and game over */
     #login-container, #gameover-container {
       position: fixed;
       top: 50%;
@@ -94,8 +94,8 @@
     
     // --- Game Code ---
     function startGame() {
-      let scene; // For helper functions to use
-      let localUsernameText; // Displays the local player's name above their tank
+      let scene; // used by helper functions
+      let localUsernameText; // displays local player's username above their tank
       
       const config = {
         type: Phaser.AUTO,
@@ -121,8 +121,8 @@
       let localWeaponText;
       let currentWeapon = 1; // 1 = Normal, 2 = RPG, 3 = Rapid Fire
       let bulletGroup;
-      let bulletMap = {};  // To track bullets from Firebase
-      let otherPlayers = {};  // Remote players
+      let bulletMap = {};  // tracks bullets from Firebase
+      let otherPlayers = {};  // remote players
       
       // Crate obstacles
       let crates;
@@ -165,7 +165,7 @@
         healthBar.fillRect(x + 1, y + 1, (barWidth - 2) * healthPercent, barHeight - 2);
       }
       
-      // Helper: Trigger explosion for an RPG bullet and update Firebase for local & remote tanks
+      // Helper: Trigger explosion for RPG bullets (updates Firebase for local & remote tanks)
       function triggerExplosion(bullet, bulletKey) {
         let explosion = scene.add.circle(bullet.x, bullet.y, explosionRadius, 0xffaa00, 0.5);
         scene.tweens.add({
@@ -200,14 +200,13 @@
             });
           }
         }
-        // Remove the RPG bullet from Firebase and locally
         set(ref(db, "bullets/" + bulletKey), null);
-        if (bullet && bullet.destroy) {
+        if(bullet && bullet.destroy) {
           bullet.destroy();
         }
       }
       
-      // Immediately remove a player when dead and show the game over overlay
+      // Show the game over overlay and remove the player from Firebase
       function doGameOver() {
         gameOverTriggered = true;
         localTank.setTint(0xff0000);
@@ -316,17 +315,6 @@
           const pid = data.key;
           if (pid === playerId) return;
           const dataVal = data.val();
-          // If a remote player's health is 0 or less, immediately remove them from Firebase
-          if (dataVal.health <= 0) {
-            set(ref(db, "players/" + pid), null);
-            if (otherPlayers[pid]) {
-              otherPlayers[pid].sprite.destroy();
-              otherPlayers[pid].healthBar.destroy();
-              otherPlayers[pid].usernameText.destroy();
-              delete otherPlayers[pid];
-            }
-            return;
-          }
           if (otherPlayers[pid]) {
             const remote = otherPlayers[pid].sprite;
             remote.x = dataVal.x;
@@ -336,6 +324,12 @@
             otherPlayers[pid].lastPing = dataVal.lastPing;
             otherPlayers[pid].username = dataVal.username;
             otherPlayers[pid].usernameText.setText(dataVal.username);
+            if (remote.health <= 0) {
+              remote.destroy();
+              otherPlayers[pid].healthBar.destroy();
+              otherPlayers[pid].usernameText.destroy();
+              delete otherPlayers[pid];
+            }
           }
         });
         onChildRemoved(playersRef, (data) => {
@@ -370,7 +364,7 @@
           }
         });
         
-        // Restart game when the game over overlay button is clicked
+        // Restart game when game over overlay button is clicked
         document.getElementById("restart-button").addEventListener("click", () => {
           window.location.reload();
         });
@@ -431,10 +425,12 @@
         }
         
         // Shooting logic:
-        // Special case 1: If username is "reed" and using RPG, fire shotgun-style rapid fire (same 50ms cooldown) 
-        if (currentWeapon === 2 && username.toLowerCase() === "reed" && spaceKey.isDown && time > lastShotTime + 50) {
+        // Special case 1: if username is "reed" and using RPG, fire a shotgun spread on space press
+        if (currentWeapon === 2 && username.toLowerCase() === "reed" && Phaser.Input.Keyboard.JustDown(spaceKey) && time > lastShotTime + cooldownUsed) {
           const numPellets = 5;
+          // Total spread of 30 degrees (converted to radians)
           const spreadRange = Phaser.Math.DegToRad(30);
+          // Calculate individual pellet offsets from -spreadRange/2 to +spreadRange/2
           for (let i = 0; i < numPellets; i++) {
             let offset = -spreadRange / 2 + (i * spreadRange / (numPellets - 1));
             let angle = localTank.rotation + offset;
@@ -456,7 +452,7 @@
           }
           lastShotTime = time;
         }
-        // Special case 2: If username is "pranav" and using RPG, rapid fire single RPG rounds every 50ms
+        // Special case 2: if username is "pranav" with RPG, allow rapid fire (every 50ms)
         else if (currentWeapon === 2 && username.toLowerCase() === "pranav" && spaceKey.isDown && time > lastShotTime + 50) {
           const bulletDir = new Phaser.Math.Vector2(Math.cos(localTank.rotation), Math.sin(localTank.rotation));
           const vx = bulletDir.x * bulletSpeedUsed;
@@ -475,7 +471,7 @@
           set(bulletRef, bulletData);
           lastShotTime = time;
         }
-        // Default shooting for all other cases
+        // Default shooting behavior for all other cases
         else if (Phaser.Input.Keyboard.JustDown(spaceKey) && time > lastShotTime + cooldownUsed) {
           const bulletDir = new Phaser.Math.Vector2(Math.cos(localTank.rotation), Math.sin(localTank.rotation));
           const vx = bulletDir.x * bulletSpeedUsed;
@@ -495,14 +491,14 @@
           lastShotTime = time;
         }
         
-        // Bullet collision detection with tanks and boundaries
+        // Bullet collision detection
         for (const key in bulletMap) {
           const b = bulletMap[key];
           if (b.x < 0 || b.x > scene.cameras.main.width || b.y < 0 || b.y > scene.cameras.main.height) {
             set(ref(db, "bullets/" + key), null);
             continue;
           }
-          // For bullets fired by others: check collision with local tank
+          // Check collision for bullets fired by others with local tank
           if (b.shooter !== playerId) {
             if (Phaser.Geom.Intersects.RectangleToRectangle(b.getBounds(), localTank.getBounds())) {
               if (b.weaponType === 2) {
@@ -518,7 +514,7 @@
               continue;
             }
           } else {
-            // For bullets fired by the local player: check collision with remote tanks
+            // For bullets fired by the local player, check collision with remote tanks
             for (const pid in otherPlayers) {
               const remote = otherPlayers[pid].sprite;
               if (Phaser.Geom.Intersects.RectangleToRectangle(b.getBounds(), remote.getBounds())) {
@@ -539,23 +535,6 @@
                 }
                 break;
               }
-            }
-          }
-        }
-        
-        // --- New: Bullet vs Bullet Collision for RPG explosions ---
-        // For every RPG bullet, check if it collides with any other bullet.
-        let rpgKeys = Object.keys(bulletMap).filter(key => bulletMap[key].weaponType === 2);
-        for (let key1 of rpgKeys) {
-          let bullet1 = bulletMap[key1];
-          if (!bullet1) continue;
-          for (let key2 in bulletMap) {
-            if (key1 === key2) continue;
-            let bullet2 = bulletMap[key2];
-            if (!bullet2) continue;
-            if (Phaser.Geom.Intersects.RectangleToRectangle(bullet1.getBounds(), bullet2.getBounds())) {
-              triggerExplosion(bullet1, key1);
-              break;
             }
           }
         }
