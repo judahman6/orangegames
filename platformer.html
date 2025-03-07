@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Top Down Tank Game – Multiplayer (Fullscreen & Fixed Movement)</title>
+  <title>Top Down Tank Game – Multiplayer (Fullscreen & Fixed Shield Behavior)</title>
   <style>
     body { margin: 0; overflow: hidden; background: #333; }
     /* Fullscreen game container */
@@ -150,15 +150,19 @@
         3: { damage: 15, cooldown: 200, speed: 300 }
       };
       
+      // When shooting, if the player has a shield, spawn the bullet outside the shield.
       function shootBullet(angle, speed, damage, weaponType) {
         const now = Date.now();
+        let offset = localPlayer.shield ? (SHIELD_RADIUS + 10) : 0;
+        let startX = localPlayer.x + Math.cos(angle) * offset;
+        let startY = localPlayer.y + Math.sin(angle) * offset;
         let bullet = {
           id: "bullet_" + Math.floor(Math.random() * 1000000),
           shooter: playerId,
           weapon: weaponType,
           damage: damage,
-          x: localPlayer.x,
-          y: localPlayer.y,
+          x: startX,
+          y: startY,
           vx: Math.cos(angle) * speed / 1000,
           vy: Math.sin(angle) * speed / 1000,
           timestamp: now,
@@ -257,24 +261,20 @@
         
         handleShooting();
         
-        // Update bullets and collision detection
+        // Update bullets and handle collisions
         for (let i = bullets.length - 1; i >= 0; i--) {
           let b = bullets[i];
           b.x += b.vx * dt * 1000;
           b.y += b.vy * dt * 1000;
           
-          if (b.x < 0 || b.x > canvas.width || b.y < 0 || b.y > canvas.height) {
+          // Remove bullet if off-screen or too old
+          if (b.x < 0 || b.x > canvas.width || b.y < 0 || b.y > canvas.height || Date.now() - b.timestamp > 5000) {
             set(ref(db, "bullets/" + b.id), null);
             bullets.splice(i, 1);
             continue;
           }
           
-          if (Date.now() - b.timestamp > 5000) {
-            set(ref(db, "bullets/" + b.id), null);
-            bullets.splice(i, 1);
-            continue;
-          }
-          
+          // Check collision with crates
           let hitCrate = false;
           for (let crate of crates) {
             if (b.x > crate.x && b.x < crate.x + crate.width &&
@@ -289,6 +289,7 @@
             continue;
           }
           
+          // Check collision with local player's shield
           if (localPlayer.shield) {
             let dx = b.x - localPlayer.x;
             let dy = b.y - localPlayer.y;
@@ -307,6 +308,7 @@
             }
           }
           
+          // Check collision with remote players' shields
           for (let id in remotePlayers) {
             let rp = remotePlayers[id];
             if (rp.shield) {
@@ -329,42 +331,58 @@
             }
           }
           
+          // Collision with tanks:
+          // For bullets that have already been deflected, remove them immediately on impact.
           if (b.shooter !== playerId) {
             let dx = b.x - localPlayer.x, dy = b.y - localPlayer.y;
             if (Math.sqrt(dx*dx + dy*dy) < 20) {
-              if (b.weapon === 2)
-                localPlayer.health -= weaponParams[2].explosionDamage;
-              else
-                localPlayer.health -= b.damage;
-              set(ref(db, "bullets/" + b.id), null);
-              bullets.splice(i, 1);
-              if (localPlayer.health <= 0) gameOver();
-              continue;
+              if(b.deflected) {
+                set(ref(db, "bullets/" + b.id), null);
+                bullets.splice(i, 1);
+                continue;
+              } else {
+                if (b.weapon === 2)
+                  localPlayer.health -= weaponParams[2].explosionDamage;
+                else
+                  localPlayer.health -= b.damage;
+                set(ref(db, "bullets/" + b.id), null);
+                bullets.splice(i, 1);
+                if (localPlayer.health <= 0) gameOver();
+                continue;
+              }
             }
           } else {
             for (let id in remotePlayers) {
               let rp = remotePlayers[id];
               let dx = b.x - rp.x, dy = b.y - rp.y;
               if (Math.sqrt(dx*dx + dy*dy) < 20) {
-                if (b.weapon === 2)
-                  rp.health -= weaponParams[2].explosionDamage;
-                else
-                  rp.health -= b.damage;
-                set(ref(db, "players/" + id), rp);
-                set(ref(db, "bullets/" + b.id), null);
-                bullets.splice(i, 1);
-                break;
+                if(b.deflected) {
+                  set(ref(db, "bullets/" + b.id), null);
+                  bullets.splice(i, 1);
+                  break;
+                } else {
+                  if (b.weapon === 2)
+                    rp.health -= weaponParams[2].explosionDamage;
+                  else
+                    rp.health -= b.damage;
+                  set(ref(db, "players/" + id), rp);
+                  set(ref(db, "bullets/" + b.id), null);
+                  bullets.splice(i, 1);
+                  break;
+                }
               }
             }
           }
         }
         
+        // Remove remote players who haven't pinged recently
         for (let id in remotePlayers) {
           if (Date.now() - remotePlayers[id].lastPing > 10000) {
             delete remotePlayers[id];
           }
         }
         
+        // Update local player state to Firebase
         set(ref(db, "players/" + playerId), {
           x: localPlayer.x,
           y: localPlayer.y,
