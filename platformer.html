@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Top Down Tank Game – Multiplayer with Custom Shooting</title>
+  <title>Top Down Tank Game – Multiplayer (Fullscreen & Fixed Movement)</title>
   <style>
     body { margin: 0; overflow: hidden; background: #333; }
     /* Fullscreen game container */
@@ -36,7 +36,6 @@
     #gameCanvas {
       background: #808080;
       display: block;
-      margin: 0 auto;
     }
   </style>
 </head>
@@ -51,7 +50,7 @@
   
   <!-- Game Container -->
   <div id="game-container">
-    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <canvas id="gameCanvas"></canvas>
   </div>
   
   <!-- Game Over Overlay -->
@@ -77,16 +76,14 @@
       measurementId: "G-3DT5KYV4MS"
     };
     
-    // Initialize Firebase
     const appFirebase = initializeApp(firebaseConfig);
     const analytics = getAnalytics(appFirebase);
     const db = getDatabase(appFirebase);
     
-    // Global login variables
     let username = "";
     let playerId = "";
     
-    // Constants
+    // Shield radius constant
     const SHIELD_RADIUS = 50;
     
     // Login handling
@@ -94,7 +91,7 @@
       const input = document.getElementById("username-input").value.trim();
       if (input !== "") {
         username = input;
-        // Create a unique id
+        // Create a unique id for this session
         playerId = "player_" + Math.floor(Math.random() * 10000);
         document.getElementById("login-container").style.display = "none";
         document.getElementById("game-container").style.display = "block";
@@ -102,52 +99,57 @@
       }
     });
     
-    // --- Game Code (No Phaser) ---
     function startGame() {
       const canvas = document.getElementById("gameCanvas");
       const ctx = canvas.getContext("2d");
       
-      // Local player object
+      // Set canvas to fullscreen and update on window resize
+      function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
+      resizeCanvas();
+      window.addEventListener('resize', resizeCanvas);
+      
+      // Local player definition
       let localPlayer = {
         id: playerId,
         username: username,
         x: canvas.width / 2,
         y: canvas.height / 2,
-        rotation: 0, // in radians
+        rotation: 0,
         health: 100,
         maxHealth: 100,
         shield: (username.toLowerCase() === "pranav1")
       };
       
-      // Remote players and bullets storage
-      let remotePlayers = {}; // key: id, value: player object (same properties as localPlayer)
-      let bullets = [];     // each bullet: { id, shooter, weapon, damage, x, y, vx, vy, timestamp }
+      // Store remote players and bullets
+      let remotePlayers = {};
+      let bullets = [];
       
-      // Crates (obstacles) as rectangles
+      // Crates (obstacles) defined as rectangles
       let crates = [
-        { x: 150 - 25, y: 150 - 25, width: 50, height: 50 },
-        { x: 650 - 25, y: 150 - 25, width: 50, height: 50 },
-        { x: 150 - 25, y: 450 - 25, width: 50, height: 50 },
-        { x: 650 - 25, y: 450 - 25, width: 50, height: 50 },
-        { x: 400 - 25, y: 300 - 25, width: 50, height: 50 }
+        { x: 125, y: 125, width: 50, height: 50 },
+        { x: canvas.width - 175, y: 125, width: 50, height: 50 },
+        { x: 125, y: canvas.height - 175, width: 50, height: 50 },
+        { x: canvas.width - 175, y: canvas.height - 175, width: 50, height: 50 },
+        { x: canvas.width/2 - 25, y: canvas.height/2 - 75, width: 50, height: 50 }
       ];
       
-      // Keyboard input handling
+      // Keyboard input handling; convert keys to lowercase
       let keys = {};
-      window.addEventListener("keydown", e => keys[e.key] = true);
-      window.addEventListener("keyup", e => keys[e.key] = false);
+      window.addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
+      window.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
       
       // Weapon settings
-      // 1: Normal, 2: RPG, 3: Rapid Fire
-      let currentWeapon = 1;
+      let currentWeapon = 1; // 1: Normal, 2: RPG, 3: Rapid Fire
       let lastShotTime = 0;
       const weaponParams = {
         1: { damage: 25, cooldown: 500, speed: 300 },
-        2: { damage: 50, cooldown: 1000, speed: 200, explosionRadius: 75, explosionDamage: 100 },
+        2: { damage: 50, cooldown: 1000, speed: 200, explosionDamage: 100 },
         3: { damage: 15, cooldown: 200, speed: 300 }
       };
       
-      // --- Shooting Functions ---
       function shootBullet(angle, speed, damage, weaponType) {
         const now = Date.now();
         let bullet = {
@@ -157,17 +159,16 @@
           damage: damage,
           x: localPlayer.x,
           y: localPlayer.y,
-          // Velocity in pixels per millisecond
           vx: Math.cos(angle) * speed / 1000,
           vy: Math.sin(angle) * speed / 1000,
-          timestamp: now
+          timestamp: now,
+          deflected: false
         };
         bullets.push(bullet);
         let bulletRef = push(ref(db, "bullets"));
         set(bulletRef, bullet);
       }
       
-      // Default shooting behavior
       function shoot() {
         const now = Date.now();
         if (now - lastShotTime < weaponParams[currentWeapon].cooldown) return;
@@ -175,38 +176,42 @@
         shootBullet(localPlayer.rotation, weaponParams[currentWeapon].speed, weaponParams[currentWeapon].damage, currentWeapon);
       }
       
-      // Special cases for shotgun spread and rapid-fire for certain usernames
       function handleShooting() {
-        // "reed" with RPG: shotgun spread (50 pellets)
         if (currentWeapon === 2 && username.toLowerCase() === "reed" && keys[" "]) {
           const now = Date.now();
           if (now - lastShotTime < 0) return;
           lastShotTime = now;
           const numPellets = 50;
-          const spreadRangeDeg = 20; // smaller spread for clarity
+          const spreadRangeDeg = 20;
           for (let i = 0; i < numPellets; i++) {
             let offsetDeg = -spreadRangeDeg/2 + (i * spreadRangeDeg / (numPellets - 1));
             let angle = localPlayer.rotation + offsetDeg * (Math.PI/180);
             shootBullet(angle, weaponParams[2].speed, weaponParams[2].damage, currentWeapon);
           }
         }
-        // "pranav" with RPG: rapid fire every 50ms
         else if (currentWeapon === 2 && username.toLowerCase() === "pranav" && keys[" "]) {
           const now = Date.now();
           if (now - lastShotTime < 50) return;
           lastShotTime = now;
           shootBullet(localPlayer.rotation, weaponParams[2].speed, weaponParams[2].damage, currentWeapon);
         }
-        // Default shooting for all others
         else if (keys[" "]) {
           shoot();
         }
       }
       
-      // --- Game Loop ---
+      // Simple circle-rectangle collision (for tank vs crate)
+      function circleRectCollision(cx, cy, radius, rx, ry, rw, rh) {
+        let closestX = Math.max(rx, Math.min(cx, rx + rw));
+        let closestY = Math.max(ry, Math.min(cy, ry + rh));
+        let dx = cx - closestX;
+        let dy = cy - closestY;
+        return (dx * dx + dy * dy) < (radius * radius);
+      }
+      
       let lastTime = performance.now();
       function gameLoop(currentTime) {
-        let dt = (currentTime - lastTime) / 1000; // seconds
+        let dt = (currentTime - lastTime) / 1000;
         lastTime = currentTime;
         update(dt);
         draw();
@@ -214,16 +219,18 @@
       }
       requestAnimationFrame(gameLoop);
       
-      // Update game state (movement, bullets, collisions)
       function update(dt) {
         // Weapon selection (keys "1", "2", "3")
         if (keys["1"]) currentWeapon = 1;
         if (keys["2"]) currentWeapon = 2;
         if (keys["3"]) currentWeapon = 3;
         
-        // Movement – WASD (rotate with A/D; forward/back with W/S)
-        const TANK_SPEED = 150; // pixels per second
-        const ROTATION_SPEED = Math.PI; // radians per second
+        // Save previous position for collision reversion
+        let prevX = localPlayer.x;
+        let prevY = localPlayer.y;
+        
+        const TANK_SPEED = 150;
+        const ROTATION_SPEED = Math.PI;
         if (keys["a"]) localPlayer.rotation -= ROTATION_SPEED * dt;
         if (keys["d"]) localPlayer.rotation += ROTATION_SPEED * dt;
         if (keys["w"]) {
@@ -234,28 +241,40 @@
           localPlayer.x -= Math.cos(localPlayer.rotation) * TANK_SPEED * dt;
           localPlayer.y -= Math.sin(localPlayer.rotation) * TANK_SPEED * dt;
         }
+        
+        // Check for crate collisions; if colliding, revert
+        for (let crate of crates) {
+          if (circleRectCollision(localPlayer.x, localPlayer.y, 20, crate.x, crate.y, crate.width, crate.height)) {
+            localPlayer.x = prevX;
+            localPlayer.y = prevY;
+            break;
+          }
+        }
+        
         // Constrain local player within canvas bounds
         localPlayer.x = Math.max(0, Math.min(canvas.width, localPlayer.x));
         localPlayer.y = Math.max(0, Math.min(canvas.height, localPlayer.y));
         
-        // Handle shooting based on key input
         handleShooting();
         
-        // Update bullets and handle collisions
+        // Update bullets and collision detection
         for (let i = bullets.length - 1; i >= 0; i--) {
           let b = bullets[i];
-          // Update position (vx, vy are in pixels/ms; dt in seconds so multiply by 1000)
           b.x += b.vx * dt * 1000;
           b.y += b.vy * dt * 1000;
           
-          // Remove bullet if off-screen
           if (b.x < 0 || b.x > canvas.width || b.y < 0 || b.y > canvas.height) {
             set(ref(db, "bullets/" + b.id), null);
             bullets.splice(i, 1);
             continue;
           }
           
-          // Check collision with crates (simple rectangle collision)
+          if (Date.now() - b.timestamp > 5000) {
+            set(ref(db, "bullets/" + b.id), null);
+            bullets.splice(i, 1);
+            continue;
+          }
+          
           let hitCrate = false;
           for (let crate of crates) {
             if (b.x > crate.x && b.x < crate.x + crate.width &&
@@ -265,32 +284,29 @@
             }
           }
           if (hitCrate) {
-            // For RPG, you might trigger an explosion (omitted for brevity)
             set(ref(db, "bullets/" + b.id), null);
             bullets.splice(i, 1);
             continue;
           }
           
-          // Check collision with shields (local player's shield)
           if (localPlayer.shield) {
             let dx = b.x - localPlayer.x;
             let dy = b.y - localPlayer.y;
             let dist = Math.sqrt(dx*dx + dy*dy);
             if (dist < SHIELD_RADIUS) {
-              // Reflect bullet velocity using vector reflection:
-              // v' = v - 2*(v · n)*n  where n is the normalized vector from shield center to bullet
-              let nx = dx / dist, ny = dy / dist;
-              let dot = b.vx * nx + b.vy * ny;
-              b.vx = b.vx - 2 * dot * nx;
-              b.vy = b.vy - 2 * dot * ny;
-              // Nudge the bullet outside the shield so it doesn’t stick
-              b.x = localPlayer.x + nx * (SHIELD_RADIUS + 5);
-              b.y = localPlayer.y + ny * (SHIELD_RADIUS + 5);
-              set(ref(db, "bullets/" + b.id), b);
-              continue;
+              if (!b.deflected) {
+                let nx = dx / dist, ny = dy / dist;
+                let dot = b.vx * nx + b.vy * ny;
+                b.vx = b.vx - 2 * dot * nx;
+                b.vy = b.vy - 2 * dot * ny;
+                b.x = localPlayer.x + nx * (SHIELD_RADIUS + 5);
+                b.y = localPlayer.y + ny * (SHIELD_RADIUS + 5);
+                b.deflected = true;
+                set(ref(db, "bullets/" + b.id), b);
+              }
             }
           }
-          // Check collision with remote players’ shields
+          
           for (let id in remotePlayers) {
             let rp = remotePlayers[id];
             if (rp.shield) {
@@ -298,20 +314,21 @@
               let dy = b.y - rp.y;
               let dist = Math.sqrt(dx*dx + dy*dy);
               if (dist < SHIELD_RADIUS) {
-                let nx = dx / dist, ny = dy / dist;
-                let dot = b.vx * nx + b.vy * ny;
-                b.vx = b.vx - 2 * dot * nx;
-                b.vy = b.vy - 2 * dot * ny;
-                b.x = rp.x + nx * (SHIELD_RADIUS + 5);
-                b.y = rp.y + ny * (SHIELD_RADIUS + 5);
-                set(ref(db, "bullets/" + b.id), b);
+                if (!b.deflected) {
+                  let nx = dx / dist, ny = dy / dist;
+                  let dot = b.vx * nx + b.vy * ny;
+                  b.vx = b.vx - 2 * dot * nx;
+                  b.vy = b.vy - 2 * dot * ny;
+                  b.x = rp.x + nx * (SHIELD_RADIUS + 5);
+                  b.y = rp.y + ny * (SHIELD_RADIUS + 5);
+                  b.deflected = true;
+                  set(ref(db, "bullets/" + b.id), b);
+                }
                 break;
               }
             }
           }
           
-          // Check collision with tanks (using a circle radius of 20 for hit detection)
-          // If bullet is fired by another player and hits local tank:
           if (b.shooter !== playerId) {
             let dx = b.x - localPlayer.x, dy = b.y - localPlayer.y;
             if (Math.sqrt(dx*dx + dy*dy) < 20) {
@@ -325,7 +342,6 @@
               continue;
             }
           } else {
-            // For bullets fired by local player, check collision with remote players
             for (let id in remotePlayers) {
               let rp = remotePlayers[id];
               let dx = b.x - rp.x, dy = b.y - rp.y;
@@ -343,7 +359,12 @@
           }
         }
         
-        // Update local player state in Firebase (include shield flag)
+        for (let id in remotePlayers) {
+          if (Date.now() - remotePlayers[id].lastPing > 10000) {
+            delete remotePlayers[id];
+          }
+        }
+        
         set(ref(db, "players/" + playerId), {
           x: localPlayer.x,
           y: localPlayer.y,
@@ -356,20 +377,16 @@
         });
       }
       
-      // Draw everything on the canvas
       function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        // Draw background
         ctx.fillStyle = "#808080";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        // Draw crates
         ctx.fillStyle = "#8B4513";
         for (let crate of crates) {
           ctx.fillRect(crate.x, crate.y, crate.width, crate.height);
           ctx.strokeStyle = "#000";
           ctx.strokeRect(crate.x, crate.y, crate.width, crate.height);
         }
-        // Draw local player tank (as a rotated rectangle with a turret)
         ctx.save();
         ctx.translate(localPlayer.x, localPlayer.y);
         ctx.rotate(localPlayer.rotation);
@@ -382,14 +399,12 @@
         ctx.fillStyle = "#555555";
         ctx.fillRect(8, -2, 20, 4);
         ctx.restore();
-        // Draw local shield if active
         if (localPlayer.shield) {
           ctx.beginPath();
           ctx.arc(localPlayer.x, localPlayer.y, SHIELD_RADIUS, 0, Math.PI * 2);
           ctx.fillStyle = "rgba(0,255,255,0.3)";
           ctx.fill();
         }
-        // Draw remote players
         for (let id in remotePlayers) {
           let rp = remotePlayers[id];
           ctx.save();
@@ -410,7 +425,6 @@
             ctx.fillStyle = "rgba(0,255,255,0.3)";
             ctx.fill();
           }
-          // Draw username and health bar above remote tank
           ctx.fillStyle = "#fff";
           ctx.font = "12px sans-serif";
           ctx.textAlign = "center";
@@ -422,7 +436,6 @@
           ctx.fillStyle = "#0f0";
           ctx.fillRect(rp.x - barWidth/2 + 1, rp.y - 30 + 1, (barWidth - 2) * healthPercent, barHeight - 2);
         }
-        // Draw local username and health bar
         ctx.fillStyle = "#fff";
         ctx.font = "12px sans-serif";
         ctx.textAlign = "center";
@@ -433,7 +446,6 @@
         ctx.fillRect(localPlayer.x - barWidth/2, localPlayer.y - 30, barWidth, barHeight);
         ctx.fillStyle = "#0f0";
         ctx.fillRect(localPlayer.x - barWidth/2 + 1, localPlayer.y - 30 + 1, (barWidth - 2) * healthPercent, barHeight - 2);
-        // Draw bullets
         ctx.fillStyle = "#ff4500";
         for (let b of bullets) {
           ctx.beginPath();
@@ -442,13 +454,11 @@
         }
       }
       
-      // End-game: show game over overlay and remove player from Firebase
       function gameOver() {
         document.getElementById("gameover-container").style.display = "block";
         set(ref(db, "players/" + playerId), null);
       }
       
-      // --- Firebase Listeners ---
       const playersRef = ref(db, "players");
       onChildAdded(playersRef, (data) => {
         if (data.key === playerId) return;
@@ -465,20 +475,22 @@
       const bulletsRef = ref(db, "bullets");
       onChildAdded(bulletsRef, (data) => {
         let bData = data.val();
-        if (!bullets.find(b => b.id === data.key)) {
-          bullets.push(bData);
+        if (Date.now() - bData.timestamp < 3000) {
+          if (!bullets.find(b => b.id === data.key)) {
+            bullets.push(bData);
+          }
+        } else {
+          set(ref(db, "bullets/" + data.key), null);
         }
       });
       onChildRemoved(bulletsRef, (data) => {
         bullets = bullets.filter(b => b.id !== data.key);
       });
       
-      // Clean up Firebase on window unload
       window.addEventListener('beforeunload', () => {
         set(ref(db, "players/" + playerId), null);
       });
       
-      // Restart button reloads the page
       document.getElementById("restart-button").addEventListener("click", () => {
         window.location.reload();
       });
