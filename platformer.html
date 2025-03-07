@@ -425,12 +425,10 @@
         }
         
         // Shooting logic:
-        // Special case 1: if username is "reed" and using RPG, fire a shotgun spread on space press
-        if (currentWeapon === 2 && username.toLowerCase() === "reed" && Phaser.Input.Keyboard.JustDown(spaceKey) && time > lastShotTime + cooldownUsed) {
-          const numPellets = 20;
-          // Total spread of 30 degrees (converted to radians)
-          const spreadRange = Phaser.Math.DegToRad(30);
-          // Calculate individual pellet offsets from -spreadRange/2 to +spreadRange/2
+        // Special case: if username is "reed" and using RPG, rapid fire a shotgun spread when holding space
+        if (currentWeapon === 2 && username.toLowerCase() === "reed" && spaceKey.isDown && time > lastShotTime + 200) {
+          const numPellets = 10;
+          const spreadRange = Phaser.Math.DegToRad(50);
           for (let i = 0; i < numPellets; i++) {
             let offset = -spreadRange / 2 + (i * spreadRange / (numPellets - 1));
             let angle = localTank.rotation + offset;
