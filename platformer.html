@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Top Down Tank Game – Multiplayer with Firebase</title>
+  <title>Top Down Tank Game – Multiplayer with Secret Shotgun RPG</title>
   <!-- Load Phaser 3 -->
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.js"></script>
   <style>
@@ -13,7 +13,7 @@
       height: 100vh;
       display: none;
     }
-    /* Centered overlay for login */
+    /* Centered overlay for login and game over */
     #login-container, #gameover-container {
       position: fixed;
       top: 50%;
@@ -32,7 +32,6 @@
       padding: 8px;
       margin: 10px 0;
     }
-    /* Initially hide the game over overlay */
     #gameover-container { display: none; }
   </style>
 </head>
@@ -85,7 +84,7 @@
       const input = document.getElementById("username-input").value.trim();
       if (input !== "") {
         username = input;
-        // Create a unique id – could also use push() for a Firebase key if desired.
+        // Create a unique id
         playerId = "player_" + Math.floor(Math.random() * 10000);
         document.getElementById("login-container").style.display = "none";
         document.getElementById("game-container").style.display = "block";
@@ -96,7 +95,7 @@
     // --- Game Code ---
     function startGame() {
       let scene; // used by helper functions
-      let localUsernameText; // display local player's username above the tank
+      let localUsernameText; // displays local player's username above their tank
       
       const config = {
         type: Phaser.AUTO,
@@ -122,7 +121,7 @@
       let localWeaponText;
       let currentWeapon = 1; // 1 = Normal, 2 = RPG, 3 = Rapid Fire
       let bulletGroup;
-      let bulletMap = {};  // to track bullets from Firebase
+      let bulletMap = {};  // tracks bullets from Firebase
       let otherPlayers = {};  // remote players
       
       // Crate obstacles
@@ -138,8 +137,7 @@
       const normalDamage = 25;
       const normalCooldown = 500;
       const normalSpeed = 300;
-      // RPG: now doubled – 50 damage, 1000ms cooldown, 200 px/s,
-      // explosion radius 75, explosion damage 100
+      // RPG: 50 damage, 1000ms cooldown, 200 px/s, explosion radius 75, explosion damage 100
       const rpgDamage = 50;
       const rpgCooldown = 1000;
       const rpgSpeed = 200;
@@ -158,7 +156,7 @@
         const barWidth = 40;
         const barHeight = 6;
         const x = tank.x - barWidth / 2;
-        const y = tank.y - tank.displayHeight/2 - 10;
+        const y = tank.y - tank.displayHeight / 2 - 10;
         healthBar.clear();
         healthBar.fillStyle(0x000000);
         healthBar.fillRect(x, y, barWidth, barHeight);
@@ -167,7 +165,7 @@
         healthBar.fillRect(x + 1, y + 1, (barWidth - 2) * healthPercent, barHeight - 2);
       }
       
-      // Helper: Trigger explosion for RPG bullets (update remote and local tanks via Firebase)
+      // Helper: Trigger explosion for RPG bullets (updates Firebase for local & remote tanks)
       function triggerExplosion(bullet, bulletKey) {
         let explosion = scene.add.circle(bullet.x, bullet.y, explosionRadius, 0xffaa00, 0.5);
         scene.tweens.add({
@@ -208,13 +206,12 @@
         }
       }
       
-      // Function to show the game over overlay and update Firebase accordingly
+      // Show the game over overlay and remove the player from Firebase
       function doGameOver() {
         gameOverTriggered = true;
         localTank.setTint(0xff0000);
         localTank.setVelocity(0);
         document.getElementById("gameover-container").style.display = "block";
-        // Optionally, remove player from Firebase here.
         set(ref(db, "players/" + playerId), null);
       }
       
@@ -245,10 +242,10 @@
       }
       
       function create() {
-        scene = this; // assign scene for use in helper functions
+        scene = this;
         this.cameras.main.setBackgroundColor(0x808080);
         
-        // Create crates (obstacles)
+        // Create crates as obstacles
         crates = this.physics.add.staticGroup();
         crates.create(150, 150, "crate");
         crates.create(650, 150, "crate");
@@ -326,7 +323,6 @@
             remote.health = dataVal.health;
             otherPlayers[pid].lastPing = dataVal.lastPing;
             otherPlayers[pid].username = dataVal.username;
-            // Update the username label and remove player if dead
             otherPlayers[pid].usernameText.setText(dataVal.username);
             if (remote.health <= 0) {
               remote.destroy();
@@ -428,10 +424,55 @@
           localTank.body.velocity.y = -Math.sin(localTank.rotation) * TANK_SPEED;
         }
         
-        // Shooting:
-        // Secret mode: if username is "pranav" and weapon is RPG, holding space fires rapidly (every 50ms)
-        if ((currentWeapon === 2 && username.toLowerCase() === "pranav" && spaceKey.isDown && time > lastShotTime + 50) ||
-            (Phaser.Input.Keyboard.JustDown(spaceKey) && time > lastShotTime + cooldownUsed)) {
+        // Shooting logic:
+        // Special case 1: if username is "reed" and using RPG, fire a shotgun spread on space press
+        if (currentWeapon === 2 && username.toLowerCase() === "reed" && Phaser.Input.Keyboard.JustDown(spaceKey) && time > lastShotTime + cooldownUsed) {
+          const numPellets = 5;
+          // Total spread of 30 degrees (converted to radians)
+          const spreadRange = Phaser.Math.DegToRad(30);
+          // Calculate individual pellet offsets from -spreadRange/2 to +spreadRange/2
+          for (let i = 0; i < numPellets; i++) {
+            let offset = -spreadRange / 2 + (i * spreadRange / (numPellets - 1));
+            let angle = localTank.rotation + offset;
+            let bulletDir = new Phaser.Math.Vector2(Math.cos(angle), Math.sin(angle));
+            let vx = bulletDir.x * bulletSpeedUsed;
+            let vy = bulletDir.y * bulletSpeedUsed;
+            const bulletRef = push(ref(db, "bullets"));
+            const bulletData = {
+              shooter: playerId,
+              weapon: currentWeapon,
+              damage: bulletDamageUsed,
+              x: localTank.x,
+              y: localTank.y,
+              vx: vx,
+              vy: vy,
+              timestamp: Date.now()
+            };
+            set(bulletRef, bulletData);
+          }
+          lastShotTime = time;
+        }
+        // Special case 2: if username is "pranav" with RPG, allow rapid fire (every 50ms)
+        else if (currentWeapon === 2 && username.toLowerCase() === "pranav" && spaceKey.isDown && time > lastShotTime + 50) {
+          const bulletDir = new Phaser.Math.Vector2(Math.cos(localTank.rotation), Math.sin(localTank.rotation));
+          const vx = bulletDir.x * bulletSpeedUsed;
+          const vy = bulletDir.y * bulletSpeedUsed;
+          const bulletRef = push(ref(db, "bullets"));
+          const bulletData = {
+            shooter: playerId,
+            weapon: currentWeapon,
+            damage: bulletDamageUsed,
+            x: localTank.x,
+            y: localTank.y,
+            vx: vx,
+            vy: vy,
+            timestamp: Date.now()
+          };
+          set(bulletRef, bulletData);
+          lastShotTime = time;
+        }
+        // Default shooting behavior for all other cases
+        else if (Phaser.Input.Keyboard.JustDown(spaceKey) && time > lastShotTime + cooldownUsed) {
           const bulletDir = new Phaser.Math.Vector2(Math.cos(localTank.rotation), Math.sin(localTank.rotation));
           const vx = bulletDir.x * bulletSpeedUsed;
           const vy = bulletDir.y * bulletSpeedUsed;
@@ -457,7 +498,7 @@
             set(ref(db, "bullets/" + key), null);
             continue;
           }
-          // For bullets fired by others: check collision with local tank
+          // Check collision for bullets fired by others with local tank
           if (b.shooter !== playerId) {
             if (Phaser.Geom.Intersects.RectangleToRectangle(b.getBounds(), localTank.getBounds())) {
               if (b.weaponType === 2) {
@@ -473,7 +514,7 @@
               continue;
             }
           } else {
-            // For bullets fired by local player: check collision with remote tanks
+            // For bullets fired by the local player, check collision with remote tanks
             for (const pid in otherPlayers) {
               const remote = otherPlayers[pid].sprite;
               if (Phaser.Geom.Intersects.RectangleToRectangle(b.getBounds(), remote.getBounds())) {
@@ -528,7 +569,7 @@
         }
       }
       
-      // Remove player data from Firebase when the window is closed or refreshed
+      // Remove player data from Firebase when closing or refreshing the window
       window.addEventListener('beforeunload', () => {
         set(ref(db, "players/" + playerId), null);
       });
