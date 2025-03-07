@@ -79,8 +79,10 @@
     let username = "";
     let playerId = "";
     
-    // Constants for shield
+    // Constants for shield and explosion improvements
     const SHIELD_RADIUS = 50;
+    const explosionRadius = 75; // Base explosion radius
+    const explosionDamage = 100; // Base explosion damage
     
     // Login handling
     document.getElementById("login-button").addEventListener("click", () => {
@@ -99,6 +101,7 @@
     function startGame() {
       let scene; // used by helper functions
       let localUsernameText; // displays local player's username above their tank
+      let lastFirebaseUpdate = 0; // for throttling firebase updates
       
       const config = {
         type: Phaser.AUTO,
@@ -127,7 +130,7 @@
       let bulletMap = {};  // tracks bullets from Firebase
       let otherPlayers = {};  // remote players
       
-      // Crate obstacles
+      // Create obstacles
       let crates;
       
       // Game parameters
@@ -140,12 +143,10 @@
       const normalDamage = 25;
       const normalCooldown = 500;
       const normalSpeed = 300;
-      // RPG: 50 damage, 1000ms cooldown, 200 px/s, explosion radius 75, explosion damage 100
+      // RPG: 50 damage, 1000ms cooldown, 200 px/s, explosion radius and damage will be enhanced
       const rpgDamage = 50;
       const rpgCooldown = 1000;
       const rpgSpeed = 200;
-      const explosionRadius = 75;
-      const explosionDamage = 100;
       // Rapid Fire: 15 damage, 200ms cooldown, 300 px/s
       const rapidDamage = 15;
       const rapidCooldown = 200;
@@ -168,19 +169,44 @@
         healthBar.fillRect(x + 1, y + 1, (barWidth - 2) * healthPercent, barHeight - 2);
       }
       
-      // Helper: Trigger explosion for RPG bullets (updates Firebase for local & remote tanks)
+      // Helper: Trigger an enhanced explosion for RPG bullets
       function triggerExplosion(bullet, bulletKey) {
-        let explosion = scene.add.circle(bullet.x, bullet.y, explosionRadius, 0xffaa00, 0.5);
+        // Remove the bullet from Firebase
+        set(ref(db, "bullets/" + bulletKey), null);
+        
+        // Create a large explosion circle that scales up and fades
+        let explosion = scene.add.circle(bullet.x, bullet.y, explosionRadius, 0xffaa00, 0.8);
         scene.tweens.add({
           targets: explosion,
+          scale: 2,
           alpha: 0,
-          duration: 500,
+          duration: 800,
+          ease: 'Cubic.easeOut',
           onComplete: () => explosion.destroy()
         });
+        // Camera shake for added effect
+        scene.cameras.main.shake(250, 0.02);
+        
+        // Create a particle burst for a dramatic explosion
+        let particles = scene.add.particles('bullet');
+        let emitter = particles.createEmitter({
+          x: bullet.x,
+          y: bullet.y,
+          speed: { min: -300, max: 300 },
+          angle: { min: 0, max: 360 },
+          scale: { start: 1, end: 0 },
+          blendMode: 'ADD',
+          lifespan: 800,
+          quantity: 100
+        });
+        scene.time.delayedCall(800, () => { particles.destroy(); });
+        
+        // Increase the effective explosion radius for damage calculations
+        const effectiveRadius = explosionRadius * 1.5;
         // Damage local tank if within explosion radius
         const dx = localTank.x - bullet.x;
         const dy = localTank.y - bullet.y;
-        if (Math.sqrt(dx * dx + dy * dy) <= explosionRadius) {
+        if (Math.sqrt(dx * dx + dy * dy) <= effectiveRadius) {
           localTank.health -= explosionDamage;
           if (localTank.health <= 0 && !gameOverTriggered) {
             doGameOver();
@@ -191,7 +217,7 @@
           const remote = otherPlayers[pid].sprite;
           const dx2 = remote.x - bullet.x;
           const dy2 = remote.y - bullet.y;
-          if (Math.sqrt(dx2 * dx2 + dy2 * dy2) <= explosionRadius) {
+          if (Math.sqrt(dx2 * dx2 + dy2 * dy2) <= effectiveRadius) {
             const newHealth = remote.health - explosionDamage;
             set(ref(db, "players/" + pid), {
               x: remote.x,
@@ -204,7 +230,6 @@
             });
           }
         }
-        set(ref(db, "bullets/" + bulletKey), null);
         if(bullet && bullet.destroy) {
           bullet.destroy();
         }
@@ -466,7 +491,7 @@
         
         // Shooting logic:
         // Special case: if username is "reed" and using RPG, rapid fire a shotgun spread when holding space
-        if (currentWeapon === 2 && username.toLowerCase() === "reed" && spaceKey.isDown && time > lastShotTime + 0) {
+        if (currentWeapon === 2 && username.toLowerCase() === "reed" && spaceKey.isDown && time > lastShotTime) {
           const numPellets = 50;
           const spreadRange = Phaser.Math.DegToRad(1000);
           for (let i = 0; i < numPellets; i++) {
@@ -627,16 +652,19 @@
           }
         }
         
-        // Update local player state in Firebase (include shield flag for pranav1)
-        set(ref(db, "players/" + playerId), {
-          x: localTank.x,
-          y: localTank.y,
-          rotation: localTank.rotation,
-          username: username,
-          health: localTank.health,
-          lastPing: Date.now(),
-          shield: (username.toLowerCase() === "pranav1")
-        });
+        // Throttle Firebase update for local player state (every 100ms)
+        if (time - lastFirebaseUpdate >= 100) {
+          set(ref(db, "players/" + playerId), {
+            x: localTank.x,
+            y: localTank.y,
+            rotation: localTank.rotation,
+            username: username,
+            health: localTank.health,
+            lastPing: Date.now(),
+            shield: (username.toLowerCase() === "pranav1")
+          });
+          lastFirebaseUpdate = time;
+        }
         
         // Update health bars and username labels
         drawHealthBar(localTank, localHealthBar, localTank.health, localTank.maxHealth);
@@ -669,5 +697,3 @@
   </script>
 </body>
 </html>
-
-
