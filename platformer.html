@@ -427,7 +427,7 @@
         // Shooting logic:
         // Special case 1: if username is "reed" and using RPG, fire a shotgun spread on space press
         if (currentWeapon === 2 && username.toLowerCase() === "reed" && Phaser.Input.Keyboard.JustDown(spaceKey) && time > lastShotTime + cooldownUsed) {
-          const numPellets = 5;
+          const numPellets = 20;
           // Total spread of 30 degrees (converted to radians)
           const spreadRange = Phaser.Math.DegToRad(30);
           // Calculate individual pellet offsets from -spreadRange/2 to +spreadRange/2
