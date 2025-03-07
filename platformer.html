@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Top Down Tank Game – Multiplayer with Secret Shotgun RPG & Shield Feature</title>
+  <title>Top Down Tank Game – Multiplayer with Secret Shotgun RPG</title>
   <!-- Load Phaser 3 -->
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.js"></script>
   <style>
@@ -97,11 +97,40 @@
       let scene; // used by helper functions
       let localUsernameText; // displays local player's username above their tank
       
-      // Constants
+      const config = {
+        type: Phaser.AUTO,
+        parent: "game-container",
+        scale: {
+          mode: Phaser.Scale.FIT,
+          autoCenter: Phaser.Scale.CENTER_BOTH,
+          width: 800,
+          height: 600,
+        },
+        physics: {
+          default: "arcade",
+          arcade: { gravity: { x: 0, y: 0 }, debug: false }
+        },
+        scene: { preload: preload, create: create, update: update }
+      };
+      
+      const game = new Phaser.Game(config);
+      
+      let localTank;
+      let localHealthBar;
+      let keys, spaceKey, weaponKeys;
+      let localWeaponText;
+      let currentWeapon = 1; // 1 = Normal, 2 = RPG, 3 = Rapid Fire
+      let bulletGroup;
+      let bulletMap = {};  // tracks bullets from Firebase
+      let otherPlayers = {};  // remote players
+      
+      // Crate obstacles
+      let crates;
+      
+      // Game parameters
       const TANK_SPEED = 150;
       const TANK_ROTATION_SPEED = 0.04; // radians per frame
       const BASE_HEALTH = 100;
-      const SHIELD_RADIUS = 40; // radius for the shield graphic & collision
       
       // Weapon parameters:
       // Normal: 25 damage, 500ms cooldown, 300 px/s
@@ -121,11 +150,6 @@
       
       let lastShotTime = 0;
       let gameOverTriggered = false;
-      
-      // Shield variables for local player (only applies if username is "pranav")
-      let localShieldActive = false;
-      let shieldKey; // F key to toggle shield
-      let localShieldGraphic = null;
       
       // Helper: Draw a health bar above a tank
       function drawHealthBar(tank, healthBar, currentHealth, maxHealth) {
@@ -269,11 +293,6 @@
         });
         localWeaponText = this.add.text(10, 30, "Weapon: Normal", { fontSize: '16px', fill: '#fff' });
         
-        // If player is "pranav", add shield key (F) to toggle shield
-        if (username.toLowerCase() === "pranav") {
-          shieldKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F);
-        }
-        
         // Firebase listeners for remote players
         const playersRef = ref(db, "players");
         onChildAdded(playersRef, (data) => {
@@ -289,19 +308,7 @@
             scene.physics.add.collider(remote, crates);
             let healthBar = scene.add.graphics();
             let usernameText = scene.add.text(dataVal.x, dataVal.y - remote.displayHeight - 15, dataVal.username, { fontSize: '12px', fill: '#fff' }).setOrigin(0.5);
-            otherPlayers[pid] = { 
-              sprite: remote, 
-              healthBar: healthBar, 
-              usernameText: usernameText, 
-              lastPing: dataVal.lastPing, 
-              username: dataVal.username,
-              shieldActive: dataVal.shieldActive || false,
-              shieldGraphic: null
-            };
-            // If remote player is "pranav" and has shield active, show shield
-            if(dataVal.username.toLowerCase() === "pranav" && dataVal.shieldActive) {
-              otherPlayers[pid].shieldGraphic = scene.add.circle(dataVal.x, dataVal.y, SHIELD_RADIUS, 0x00ffff, 0.3);
-            }
+            otherPlayers[pid] = { sprite: remote, healthBar: healthBar, usernameText: usernameText, lastPing: dataVal.lastPing, username: dataVal.username };
           }
         });
         onChildChanged(playersRef, (data) => {
@@ -317,24 +324,10 @@
             otherPlayers[pid].lastPing = dataVal.lastPing;
             otherPlayers[pid].username = dataVal.username;
             otherPlayers[pid].usernameText.setText(dataVal.username);
-            // Update shield status and graphic for remote player if they are "pranav"
-            otherPlayers[pid].shieldActive = dataVal.shieldActive || false;
-            if(otherPlayers[pid].username.toLowerCase() === "pranav") {
-              if(dataVal.shieldActive && !otherPlayers[pid].shieldGraphic) {
-                otherPlayers[pid].shieldGraphic = scene.add.circle(dataVal.x, dataVal.y, SHIELD_RADIUS, 0x00ffff, 0.3);
-              } else if(!dataVal.shieldActive && otherPlayers[pid].shieldGraphic) {
-                otherPlayers[pid].shieldGraphic.destroy();
-                otherPlayers[pid].shieldGraphic = null;
-              }
-            }
-            // If health drops to 0, remove remote player
             if (remote.health <= 0) {
               remote.destroy();
               otherPlayers[pid].healthBar.destroy();
               otherPlayers[pid].usernameText.destroy();
-              if(otherPlayers[pid].shieldGraphic) {
-                otherPlayers[pid].shieldGraphic.destroy();
-              }
               delete otherPlayers[pid];
             }
           }
@@ -345,9 +338,6 @@
             otherPlayers[pid].sprite.destroy();
             otherPlayers[pid].healthBar.destroy();
             otherPlayers[pid].usernameText.destroy();
-            if(otherPlayers[pid].shieldGraphic) {
-              otherPlayers[pid].shieldGraphic.destroy();
-            }
             delete otherPlayers[pid];
           }
         });
@@ -434,26 +424,6 @@
           localTank.body.velocity.y = -Math.sin(localTank.rotation) * TANK_SPEED;
         }
         
-        // Shield toggle (only for "pranav")
-        if (username.toLowerCase() === "pranav" && shieldKey && Phaser.Input.Keyboard.JustDown(shieldKey)) {
-          localShieldActive = !localShieldActive;
-        }
-        // Manage local shield graphic
-        if (username.toLowerCase() === "pranav") {
-          if (localShieldActive) {
-            if (!localShieldGraphic) {
-              localShieldGraphic = scene.add.circle(localTank.x, localTank.y, SHIELD_RADIUS, 0x00ffff, 0.3);
-            } else {
-              localShieldGraphic.setPosition(localTank.x, localTank.y);
-            }
-          } else {
-            if (localShieldGraphic) {
-              localShieldGraphic.destroy();
-              localShieldGraphic = null;
-            }
-          }
-        }
-        
         // Shooting logic:
         // Special case: if username is "reed" and using RPG, rapid fire a shotgun spread when holding space
         if (currentWeapon === 2 && username.toLowerCase() === "reed" && spaceKey.isDown && time > lastShotTime + 10) {
@@ -522,40 +492,12 @@
         // Bullet collision detection
         for (const key in bulletMap) {
           const b = bulletMap[key];
-          // Remove bullet if offscreen
           if (b.x < 0 || b.x > scene.cameras.main.width || b.y < 0 || b.y > scene.cameras.main.height) {
             set(ref(db, "bullets/" + key), null);
             continue;
           }
-          
-          // --- Collision for bullets not fired by local player ---
+          // Check collision for bullets fired by others with local tank
           if (b.shooter !== playerId) {
-            // If local player is "pranav" with shield active, check shield collision first
-            if (username.toLowerCase() === "pranav" && localShieldActive) {
-              let dx = b.x - localTank.x;
-              let dy = b.y - localTank.y;
-              if (Math.sqrt(dx*dx + dy*dy) <= SHIELD_RADIUS) {
-                // Reflect bullet off shield
-                let bulletVel = new Phaser.Math.Vector2(b.body.velocity.x, b.body.velocity.y);
-                let normal = new Phaser.Math.Vector2(dx, dy).normalize();
-                let dot = bulletVel.dot(normal);
-                let reflected = bulletVel.subtract(normal.scale(2 * dot));
-                b.body.setVelocity(reflected.x, reflected.y);
-                // Update bullet data in Firebase so others see it
-                set(ref(db, "bullets/" + key), {
-                  shooter: b.shooter,
-                  weapon: b.weaponType,
-                  damage: b.damage,
-                  x: b.x,
-                  y: b.y,
-                  vx: reflected.x,
-                  vy: reflected.y,
-                  timestamp: Date.now()
-                });
-                continue;
-              }
-            }
-            // Normal collision with local tank if not deflected
             if (Phaser.Geom.Intersects.RectangleToRectangle(b.getBounds(), localTank.getBounds())) {
               if (b.weaponType === 2) {
                 triggerExplosion(b, key);
@@ -569,36 +511,10 @@
               }
               continue;
             }
-          }
-          // --- Collision for bullets fired by local player hitting remote tanks ---
-          else {
+          } else {
+            // For bullets fired by the local player, check collision with remote tanks
             for (const pid in otherPlayers) {
               const remote = otherPlayers[pid].sprite;
-              // If the remote player is "pranav" with an active shield, check for shield collision
-              if (otherPlayers[pid].username.toLowerCase() === "pranav" && otherPlayers[pid].shieldActive) {
-                let dx = b.x - remote.x;
-                let dy = b.y - remote.y;
-                if (Math.sqrt(dx*dx + dy*dy) <= SHIELD_RADIUS) {
-                  // Reflect bullet off the remote shield
-                  let bulletVel = new Phaser.Math.Vector2(b.body.velocity.x, b.body.velocity.y);
-                  let normal = new Phaser.Math.Vector2(dx, dy).normalize();
-                  let dot = bulletVel.dot(normal);
-                  let reflected = bulletVel.subtract(normal.scale(2 * dot));
-                  b.body.setVelocity(reflected.x, reflected.y);
-                  set(ref(db, "bullets/" + key), {
-                    shooter: b.shooter,
-                    weapon: b.weaponType,
-                    damage: b.damage,
-                    x: b.x,
-                    y: b.y,
-                    vx: reflected.x,
-                    vy: reflected.y,
-                    timestamp: Date.now()
-                  });
-                  break;
-                }
-              }
-              // Otherwise, if bullet hits the remote tank normally:
               if (Phaser.Geom.Intersects.RectangleToRectangle(b.getBounds(), remote.getBounds())) {
                 if (b.weaponType === 2) {
                   triggerExplosion(b, key);
@@ -621,27 +537,23 @@
           }
         }
         
-        // Update local player state in Firebase (include shieldActive for "pranav")
+        // Update local player state in Firebase
         set(ref(db, "players/" + playerId), {
           x: localTank.x,
           y: localTank.y,
           rotation: localTank.rotation,
           username: username,
           health: localTank.health,
-          shieldActive: (username.toLowerCase() === "pranav") ? localShieldActive : false,
           lastPing: Date.now()
         });
         
-        // Update health bars, username labels, and remote shield positions
+        // Update health bars and username labels
         drawHealthBar(localTank, localHealthBar, localTank.health, localTank.maxHealth);
         localUsernameText.setPosition(localTank.x, localTank.y - localTank.displayHeight - 15);
         for (const pid in otherPlayers) {
           const remoteObj = otherPlayers[pid];
           drawHealthBar(remoteObj.sprite, remoteObj.healthBar, remoteObj.sprite.health, remoteObj.sprite.maxHealth);
           remoteObj.usernameText.setPosition(remoteObj.sprite.x, remoteObj.sprite.y - remoteObj.sprite.displayHeight - 15);
-          if (remoteObj.shieldGraphic) {
-            remoteObj.shieldGraphic.setPosition(remoteObj.sprite.x, remoteObj.sprite.y);
-          }
         }
         
         // Remove offline remote players (if no ping for 10 seconds)
@@ -650,9 +562,6 @@
             otherPlayers[pid].sprite.destroy();
             otherPlayers[pid].healthBar.destroy();
             otherPlayers[pid].usernameText.destroy();
-            if(otherPlayers[pid].shieldGraphic) {
-              otherPlayers[pid].shieldGraphic.destroy();
-            }
             delete otherPlayers[pid];
           }
         }
@@ -665,4 +574,4 @@
     }
   </script>
 </body>
-</html>
+</html> 
