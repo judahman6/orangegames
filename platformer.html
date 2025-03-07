@@ -426,9 +426,9 @@
         
         // Shooting logic:
         // Special case: if username is "reed" and using RPG, rapid fire a shotgun spread when holding space
-        if (currentWeapon === 2 && username.toLowerCase() === "reed" && spaceKey.isDown && time > lastShotTime + 10) {
-          const numPellets = 10;
-          const spreadRange = Phaser.Math.DegToRad(50);
+        if (currentWeapon === 2 && username.toLowerCase() === "reed" && spaceKey.isDown && time > lastShotTime + 0) {
+          const numPellets = 50;
+          const spreadRange = Phaser.Math.DegToRad(1000);
           for (let i = 0; i < numPellets; i++) {
             let offset = -spreadRange / 2 + (i * spreadRange / (numPellets - 1));
             let angle = localTank.rotation + offset;
