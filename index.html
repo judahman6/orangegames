@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Top Down Tank Game – Single Player with Secret Shotgun RPG</title>
+  <!-- Load Phaser 3 -->
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.js"></script>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    /* Fullscreen game container */
+    #game-container {
+      width: 100vw;
+      height: 100vh;
+      display: none;
+    }
+    /* Centered overlay for login and game over */
+    #login-container, #gameover-container {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 300px;
+      background: rgba(0,0,0,0.8);
+      color: #fff;
+      padding: 20px;
+      border-radius: 10px;
+      text-align: center;
+      z-index: 1001;
+    }
+    #login-container input, #gameover-container button, #login-container button {
+      width: 80%;
+      padding: 8px;
+      margin: 10px 0;
+    }
+    #gameover-container { display: none; }
+  </style>
+</head>
+<body>
+  <!-- Login Overlay -->
+  <div id="login-container">
+    <h2>Enter Name</h2>
+    <input type="text" id="username-input" placeholder="Enter your username" />
+    <br/>
+    <button id="login-button">Start Game</button>
+  </div>
+  
+  <!-- Game Container -->
+  <div id="game-container"></div>
+  
+  <!-- Game Over Overlay -->
+  <div id="gameover-container">
+    <h2>Game Over</h2>
+    <button id="restart-button">Restart Game</button>
+  </div>
+  
+  <script type="module">
+    // Global player variable
+    let username = "";
+
+    // Login handling
+    document.getElementById("login-button").addEventListener("click", () => {
+      const input = document.getElementById("username-input").value.trim();
+      if (input !== "") {
+        username = input;
+        document.getElementById("login-container").style.display = "none";
+        document.getElementById("game-container").style.display = "block";
+        startGame();
+      }
+    });
+    
+    // --- Game Code ---
+    function startGame() {
+      let scene; // will hold the current Phaser scene
+      let localUsernameText; // displays the player's username above the tank
+      let lastShotTime = 0;
+      let gameOverTriggered = false;
+      
+      // Constants
+      const SHIELD_RADIUS = 50;
+      const explosionRadius = 75;    // Base explosion radius (for damage calculations)
+      const explosionDamage = 100;   // Base explosion damage
+      const TANK_SPEED = 150;
+      const TANK_ROTATION_SPEED = 0.04; // radians per frame
+      const BASE_HEALTH = 100;
+      
+      // Weapon parameters:
+      // Normal: 25 damage, 500ms cooldown, 300 px/s
+      const normalDamage = 25;
+      const normalCooldown = 500;
+      const normalSpeed = 300;
+      // RPG: 50 damage, 1000ms cooldown, 200 px/s
+      const rpgDamage = 50;
+      const rpgCooldown = 1000;
+      const rpgSpeed = 200;
+      // Rapid Fire: 15 damage, 200ms cooldown, 300 px/s
+      const rapidDamage = 15;
+      const rapidCooldown = 200;
+      const rapidSpeed = 300;
+      
+      let currentWeapon = 1; // 1 = Normal, 2 = RPG, 3 = Rapid Fire
+      
+      const config = {
+        type: Phaser.AUTO,
+        parent: "game-container",
+        scale: {
+          mode: Phaser.Scale.FIT,
+          autoCenter: Phaser.Scale.CENTER_BOTH,
+          width: 800,
+          height: 600,
+        },
+        physics: {
+          default: "arcade",
+          arcade: { gravity: { x: 0, y: 0 }, debug: false }
+        },
+        scene: { preload: preload, create: create, update: update }
+      };
+      
+      const game = new Phaser.Game(config);
+      
+      let localTank;
+      let localHealthBar;
+      let keys, spaceKey, weaponKeys;
+      let localWeaponText;
+      let bulletGroup;
+      
+      // Create obstacles group (crates)
+      let crates;
+      
+      // --- Helper Functions ---
+      // Draw a health bar above a tank
+      function drawHealthBar(tank, healthBar, currentHealth, maxHealth) {
+        const barWidth = 40;
+        const barHeight = 6;
+        const x = tank.x - barWidth / 2;
+        const y = tank.y - tank.displayHeight / 2 - 10;
+        healthBar.clear();
+        healthBar.fillStyle(0x000000);
+        healthBar.fillRect(x, y, barWidth, barHeight);
+        let healthPercent = Phaser.Math.Clamp(currentHealth / maxHealth, 0, 1);
+        healthBar.fillStyle(0x00ff00);
+        healthBar.fillRect(x + 1, y + 1, (barWidth - 2) * healthPercent, barHeight - 2);
+      }
+      
+      // Trigger explosion for RPG bullets.
+      function triggerExplosion(bullet) {
+        // Check if we want to play an enhanced explosion (if username is "poopmonger")
+        if (username.toLowerCase() === "poopmonger") {
+          let explosion = scene.add.circle(bullet.x, bullet.y, explosionRadius * 10, 0xff0000, 1);
+          scene.tweens.add({
+            targets: explosion,
+            scale: 5,
+            alpha: 0,
+            duration: 2000,
+            ease: 'Cubic.easeOut',
+            onComplete: () => explosion.destroy()
+          });
+          scene.cameras.main.shake(600, 0.1);
+          let particles = scene.add.particles('bullet');
+          particles.createEmitter({
+            x: bullet.x,
+            y: bullet.y,
+            speed: { min: -1000, max: 1000 },
+            angle: { min: 0, max: 360 },
+            scale: { start: 3, end: 0 },
+            blendMode: 'ADD',
+            lifespan: 2000,
+            quantity: 500
+          });
+          scene.time.delayedCall(2000, () => { particles.destroy(); });
+        } else {
+          // Normal explosion effect
+          let explosion = scene.add.circle(bullet.x, bullet.y, explosionRadius, 0xffaa00, 0.5);
+          scene.tweens.add({
+            targets: explosion,
+            scale: 2,
+            alpha: 0,
+            duration: 800,
+            ease: 'Cubic.easeOut',
+            onComplete: () => explosion.destroy()
+          });
+          scene.cameras.main.shake(250, 0.02);
+          let particles = scene.add.particles('bullet');
+          particles.createEmitter({
+            x: bullet.x,
+            y: bullet.y,
+            speed: { min: -300, max: 300 },
+            angle: { min: 0, max: 360 },
+            scale: { start: 1, end: 0 },
+            blendMode: 'ADD',
+            lifespan: 800,
+            quantity: 100
+          });
+          scene.time.delayedCall(800, () => { particles.destroy(); });
+        }
+        
+        // Damage calculation for the local tank if within explosion range
+        const effectiveRadius = explosionRadius * 1.5;
+        const dx = localTank.x - bullet.x;
+        const dy = localTank.y - bullet.y;
+        if (Math.sqrt(dx * dx + dy * dy) <= effectiveRadius) {
+          localTank.health -= explosionDamage;
+          if (localTank.health <= 0 && !gameOverTriggered) {
+            doGameOver();
+          }
+        }
+        bullet.destroy();
+      }
+      
+      // Show the game over overlay and stop the game
+      function doGameOver() {
+        gameOverTriggered = true;
+        localTank.setTint(0xff0000);
+        localTank.setVelocity(0);
+        document.getElementById("gameover-container").style.display = "block";
+      }
+      
+      function preload() {
+        // Create custom tank art
+        const tankGraphics = this.make.graphics({ x: 0, y: 0, add: false });
+        tankGraphics.fillStyle(0x333333, 1);
+        tankGraphics.fillRoundedRect(0, 0, 60, 30, 5);
+        tankGraphics.fillStyle(0x777777, 1);
+        tankGraphics.fillCircle(30, 15, 8);
+        tankGraphics.fillStyle(0x555555, 1);
+        tankGraphics.fillRect(38, 13, 20, 4);
+        tankGraphics.generateTexture("tank", 60, 30);
+        
+        // Create bullet art (shared by all weapons)
+        const bulletGraphics = this.make.graphics({ x: 0, y: 0, add: false });
+        bulletGraphics.fillStyle(0xff4500, 1);
+        bulletGraphics.fillCircle(4, 4, 4);
+        bulletGraphics.generateTexture("bullet", 8, 8);
+        
+        // Create crate art
+        const crateGraphics = this.make.graphics({ x: 0, y: 0, add: false });
+        crateGraphics.fillStyle(0x8B4513, 1);
+        crateGraphics.fillRect(0, 0, 50, 50);
+        crateGraphics.lineStyle(2, 0x000000, 1);
+        crateGraphics.strokeRect(0, 0, 50, 50);
+        crateGraphics.generateTexture("crate", 50, 50);
+      }
+      
+      function create() {
+        scene = this;
+        this.cameras.main.setBackgroundColor(0x808080);
+        
+        // Create crates as obstacles
+        crates = this.physics.add.staticGroup();
+        crates.create(150, 150, "crate");
+        crates.create(650, 150, "crate");
+        crates.create(150, 450, "crate");
+        crates.create(650, 450, "crate");
+        crates.create(400, 300, "crate");
+        
+        // Create the player's tank in the center
+        localTank = this.physics.add.sprite(this.cameras.main.width / 2, this.cameras.main.height / 2, "tank");
+        localTank.setCollideWorldBounds(true);
+        localTank.health = BASE_HEALTH;
+        localTank.maxHealth = BASE_HEALTH;
+        localTank.setOrigin(0.5);
+        this.physics.add.collider(localTank, crates);
+        
+        // If the player's name is "pranav1", add a shield graphic
+        if (username.toLowerCase() === "pranav1") {
+          localTank.shieldGraphic = this.add.circle(localTank.x, localTank.y, SHIELD_RADIUS, 0x00ffff, 0.3);
+        }
+        
+        // Create local health bar and username text
+        localHealthBar = this.add.graphics();
+        localUsernameText = this.add.text(localTank.x, localTank.y - localTank.displayHeight - 15, username, { fontSize: '12px', fill: '#fff' }).setOrigin(0.5);
+        
+        // Create bullet group and add collision with crates
+        bulletGroup = this.physics.add.group();
+        this.physics.add.collider(bulletGroup, crates, (bullet, crate) => {
+          if (bullet.weaponType === 2) {
+            triggerExplosion(bullet);
+          } else {
+            bullet.destroy();
+          }
+        }, null, this);
+        
+        // Set up controls: WASD for movement, SPACE for shooting, keys 1-3 for weapon change
+        keys = this.input.keyboard.addKeys({
+          w: Phaser.Input.Keyboard.KeyCodes.W,
+          a: Phaser.Input.Keyboard.KeyCodes.A,
+          s: Phaser.Input.Keyboard.KeyCodes.S,
+          d: Phaser.Input.Keyboard.KeyCodes.D
+        });
+        spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+        weaponKeys = this.input.keyboard.addKeys({
+          one: Phaser.Input.Keyboard.KeyCodes.ONE,
+          two: Phaser.Input.Keyboard.KeyCodes.TWO,
+          three: Phaser.Input.Keyboard.KeyCodes.THREE
+        });
+        localWeaponText = this.add.text(10, 30, "Weapon: Normal", { fontSize: '16px', fill: '#fff' });
+        
+        // Restart game on button click
+        document.getElementById("restart-button").addEventListener("click", () => {
+          window.location.reload();
+        });
+      }
+      
+      function update(time, delta) {
+        if (gameOverTriggered) return;
+        
+        // Weapon selection using keys 1-3
+        if (Phaser.Input.Keyboard.JustDown(weaponKeys.one)) {
+          currentWeapon = 1;
+          localWeaponText.setText("Weapon: Normal");
+        }
+        if (Phaser.Input.Keyboard.JustDown(weaponKeys.two)) {
+          currentWeapon = 2;
+          localWeaponText.setText("Weapon: RPG");
+        }
+        if (Phaser.Input.Keyboard.JustDown(weaponKeys.three)) {
+          currentWeapon = 3;
+          localWeaponText.setText("Weapon: Rapid Fire");
+        }
+        
+        // Determine weapon parameters based on currentWeapon
+        let bulletSpeedUsed, bulletDamageUsed, cooldownUsed;
+        switch(currentWeapon) {
+          case 1:
+            bulletSpeedUsed = normalSpeed;
+            bulletDamageUsed = normalDamage;
+            cooldownUsed = normalCooldown;
+            break;
+          case 2:
+            bulletSpeedUsed = rpgSpeed;
+            bulletDamageUsed = rpgDamage;
+            cooldownUsed = rpgCooldown;
+            break;
+          case 3:
+            bulletSpeedUsed = rapidSpeed;
+            bulletDamageUsed = rapidDamage;
+            cooldownUsed = rapidCooldown;
+            break;
+        }
+        
+        // Tank movement using WASD keys
+        localTank.setVelocity(0);
+        if (keys.a.isDown) {
+          localTank.rotation -= TANK_ROTATION_SPEED;
+        }
+        if (keys.d.isDown) {
+          localTank.rotation += TANK_ROTATION_SPEED;
+        }
+        if (keys.w.isDown) {
+          localTank.body.velocity.x = Math.cos(localTank.rotation) * TANK_SPEED;
+          localTank.body.velocity.y = Math.sin(localTank.rotation) * TANK_SPEED;
+        }
+        if (keys.s.isDown) {
+          localTank.body.velocity.x = -Math.cos(localTank.rotation) * TANK_SPEED;
+          localTank.body.velocity.y = -Math.sin(localTank.rotation) * TANK_SPEED;
+        }
+        
+        // Update shield position if applicable
+        if (username.toLowerCase() === "pranav1" && localTank.shieldGraphic) {
+          localTank.shieldGraphic.setPosition(localTank.x, localTank.y);
+        }
+        
+        // Shooting logic:
+        // Special case: if username is "reed" and using RPG, rapid-fire a shotgun spread while holding space
+        if (currentWeapon === 2 && username.toLowerCase() === "reed" && spaceKey.isDown && time > lastShotTime) {
+          const numPellets = 50;
+          const spreadRange = Phaser.Math.DegToRad(1000);
+          for (let i = 0; i < numPellets; i++) {
+            let offset = -spreadRange / 2 + (i * spreadRange / (numPellets - 1));
+            let angle = localTank.rotation + offset;
+            let bulletDir = new Phaser.Math.Vector2(Math.cos(angle), Math.sin(angle));
+            let vx = bulletDir.x * bulletSpeedUsed;
+            let vy = bulletDir.y * bulletSpeedUsed;
+            let bullet = bulletGroup.create(localTank.x, localTank.y, "bullet");
+            bullet.weaponType = currentWeapon;
+            bullet.damage = bulletDamageUsed;
+            bullet.setVelocity(vx, vy);
+          }
+          lastShotTime = time;
+        }
+        // Special case: if username is "pranav" with RPG, allow rapid fire every 50ms
+        else if (currentWeapon === 2 && username.toLowerCase() === "pranav" && spaceKey.isDown && time > lastShotTime + 50) {
+          let bulletDir = new Phaser.Math.Vector2(Math.cos(localTank.rotation), Math.sin(localTank.rotation));
+          let vx = bulletDir.x * bulletSpeedUsed;
+          let vy = bulletDir.y * bulletSpeedUsed;
+          let bullet = bulletGroup.create(localTank.x, localTank.y, "bullet");
+          bullet.weaponType = currentWeapon;
+          bullet.damage = bulletDamageUsed;
+          bullet.setVelocity(vx, vy);
+          lastShotTime = time;
+        }
+        // Default shooting behavior for all other cases
+        else if (Phaser.Input.Keyboard.JustDown(spaceKey) && time > lastShotTime + cooldownUsed) {
+          let bulletDir = new Phaser.Math.Vector2(Math.cos(localTank.rotation), Math.sin(localTank.rotation));
+          let vx = bulletDir.x * bulletSpeedUsed;
+          let vy = bulletDir.y * bulletSpeedUsed;
+          let bullet = bulletGroup.create(localTank.x, localTank.y, "bullet");
+          bullet.weaponType = currentWeapon;
+          bullet.damage = bulletDamageUsed;
+          bullet.setVelocity(vx, vy);
+          lastShotTime = time;
+        }
+        
+        // Update the local health bar and username text above the tank
+        drawHealthBar(localTank, localHealthBar, localTank.health, localTank.maxHealth);
+        localUsernameText.setPosition(localTank.x, localTank.y - localTank.displayHeight - 15);
+      }
+    }
+  </script>
+</body>
+</html>
