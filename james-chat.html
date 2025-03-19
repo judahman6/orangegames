@@ -5,64 +5,95 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Pode's Chat</title>
   <style>
-    /* General styling */
+    /* --- Custom Font & Blue Aero Background --- */
+    @font-face {
+      font-family: "Segoe UI Semilight";
+      src: url(https://frutigeraeroarchive.org/fonts/segoe_ui_semilight.ttf) format("truetype");
+    }
     body {
-      font-family: 'Consolas', monospace;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
+      background: linear-gradient(135deg, #3a7bd5, #00d2ff);
+      font-family: "Segoe UI Semilight", Tahoma, Geneva, Verdana, sans-serif;
+      color: #000;
       margin: 0;
       overflow: hidden;
-      background: black;
+      cursor: default;
       position: relative;
-      color: white;
     }
-    /* Starfield */
-    .stars {
+    .stars { display: none; } /* Starfield removed */
+    
+    /* --- Glossy Green Button Style (based on your .glass snippet) --- */
+    .glossy-button {
+      position: relative;
+      display: inline-block;
+      padding: 15px 30px;
+      margin: 15px;
+      font-size: 20px;
+      font-weight: bold;
+      color: #fff;
+      background-color: green; /* Fallback */
+      background-image: linear-gradient(green, lightgreen);
+      border: 1px solid #1b8f1f;
+      border-radius: 8px;
+      text-shadow: 1px 1px 2px rgba(0,0,0,0.4);
+      box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+      overflow: hidden;
+      transition: transform 0.2s;
+      cursor: pointer;
+    }
+    .glossy-button:hover {
+      transform: translateY(-2px);
+      background-image: linear-gradient(180deg, #2fa82d, #6ed85b);
+    }
+    .glossy-button:active {
+      transform: translateY(1px);
+    }
+    .glossy-button::after {
+      content: "";
       position: absolute;
+      top: 0;
+      left: 0;
       width: 100%;
-      height: 100%;
+      height: 50%;
+      background: linear-gradient(180deg, rgba(255,255,255,0.7) 0%, rgba(255,255,255,0) 100%);
+      pointer-events: none;
+      border-top-left-radius: inherit;
+      border-top-right-radius: inherit;
     }
-    .star {
-      position: absolute;
-      width: 2px;
-      height: 2px;
-      background: white;
-      opacity: 0.8;
-      animation: twinkle 3s infinite alternate;
+    
+    /* --- Shared Inputs (glossy style for text inputs) --- */
+    input {
+      width: 100%;
+      padding: 12px;
+      margin-top: 10px;
+      border: 1px solid #1b8f1f;
+      border-radius: 8px;
+      font-size: 18px;
+      color: white;
+      background-image: linear-gradient(180deg, #6ed85b, #2fa82d);
+      box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+      transition: background 0.3s, transform 0.2s;
+      text-align: center;
+      outline: none;
     }
-    @keyframes twinkle {
-      0% { opacity: 0.5; }
-      100% { opacity: 1; }
-    }
-    /* Popup style */
-    .popup {
+    
+    /* --- Popup & Modal (Glassy, with green glossy buttons) --- */
+    .popup, .modal {
       position: fixed;
-      top: 20%;
       left: 50%;
       transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.9);
+      background-image: linear-gradient(180deg, #6ed85b, #2fa82d);
       color: white;
       padding: 20px;
-      border: 2px solid #00ccff;
+      border: 2px solid #1b8f1f;
       border-radius: 8px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.3);
       z-index: 100;
       text-align: center;
       font-size: 18px;
     }
-    /* Modal common style */
+    .popup { top: 20%; }
     .modal {
-      position: fixed;
       top: 20%;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.95);
-      color: white;
-      padding: 20px;
-      border: 2px solid #00ccff;
-      border-radius: 8px;
-      z-index: 100;
       display: none;
       width: 300px;
     }
@@ -75,20 +106,21 @@
       justify-content: space-between;
       align-items: center;
       margin: 5px 0;
-      border-bottom: 1px solid #00ccff;
+      border-bottom: 1px solid #1b8f1f;
       padding-bottom: 5px;
     }
     .modal button.close-btn {
       margin-top: 10px;
       width: 100%;
-      background: #0088cc;
     }
-    /* Login Screen */
+    
+    /* --- Login Screen (Glassy Aero Style) --- */
     .login-screen {
       position: absolute;
       width: 100vw;
       height: 100vh;
-      background: rgba(0, 0, 0, 0.9);
+      background: rgba(255, 255, 255, 0.85);
+      backdrop-filter: blur(8px);
       display: flex;
       justify-content: center;
       align-items: center;
@@ -96,160 +128,146 @@
       text-align: center;
       z-index: 40;
     }
-    .login-screen input {
-      padding: 10px;
-      font-size: 18px;
-      margin-top: 10px;
-      text-align: center;
-      border: none;
-      background: rgba(0, 0, 50, 0.8);
-      color: white;
-      border-radius: 5px;
-      box-shadow: 0px 0px 10px rgba(0, 162, 255, 0.5);
+    .login-screen h2 {
+      font-size: 24px;
+      color: #2a6cc4;
+      margin-bottom: 20px;
     }
     .login-screen button {
-      margin-top: 15px;
-      padding: 10px 20px;
-      background: #00ccff;
-      border: none;
-      font-size: 18px;
-      cursor: pointer;
-      box-shadow: 0px 0px 15px #00ccff;
+      /* Use the glossy button style */
+      display: inline-block;
     }
-    /* Chat UI */
+    
+    /* --- Chat Container (Glassy Aero) --- */
     .chat-container {
       display: none;
-      width: 450px;
-      background: rgba(0, 0, 0, 0.8);
-      padding: 15px;
-      border-radius: 8px;
-      box-shadow: 0px 0px 15px rgba(0, 162, 255, 0.8);
+      width: 500px;
+      background: rgba(255, 255, 255, 0.85);
+      backdrop-filter: blur(8px);
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
       text-align: center;
       z-index: 30;
+      border: 2px solid #1b8f1f;
+      position: relative;
+      top: 50%;
+      transform: translateY(-50%);
+      margin: 0 auto;
     }
-    h2 {
-      font-size: 20px;
-      color: #00ccff;
-      text-shadow: 0px 0px 8px #00ccff;
+    .chat-container h2 {
+      font-size: 26px;
+      color: #2a6cc4;
+      text-shadow: 1px 1px 3px rgba(0,0,0,0.3);
+      margin-bottom: 10px;
     }
-    /* Chat Box */
+    
+    /* --- Chat Box --- */
     #chat-box {
       height: 300px;
       overflow-y: auto;
-      background: rgba(10, 10, 30, 0.9);
-      padding: 10px;
-      border: 1px solid #00ccff;
-      box-shadow: 0px 0px 10px #00ccff;
-      border-radius: 6px;
+      background: #f0f0f0;
+      padding: 15px;
+      border: 2px solid #1b8f1f;
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
+      border-radius: 8px;
       text-align: left;
+      margin-bottom: 15px;
     }
     .message {
-      background: rgba(0, 162, 255, 0.2);
-      padding: 6px;
-      margin: 5px;
-      border-radius: 6px;
-      box-shadow: 0px 0px 10px rgba(0, 162, 255, 0.8);
+      background-image: linear-gradient(180deg, #6ed85b, #2fa82d);
+      padding: 10px;
+      margin: 8px 0;
+      border-radius: 8px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+      color: white;
+      font-size: 18px;
     }
     .system-message {
       text-align: center;
-      color: #ffcc00;
+      color: #ff9900;
       font-style: italic;
+      font-size: 18px;
     }
     .message.highlight, .system-message.highlight {
       border: 2px solid #ff0000;
     }
     .message img {
-      max-width: 200px;
-      border-radius: 6px;
-      box-shadow: 0px 0px 10px rgba(0, 162, 255, 0.5);
+      max-width: 300px;
+      border-radius: 8px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
     }
-    input, button {
-      width: 100%;
-      padding: 8px;
-      margin-top: 8px;
-      border: none;
-      border-radius: 6px;
-      font-size: 14px;
-      color: white;
-    }
-    input {
-      background: rgba(0, 0, 50, 0.8);
-      text-align: center;
-      outline: none;
-      border: 1px solid #00ccff;
-    }
-    button {
-      background: #00ccff;
-      color: black;
-      font-weight: bold;
-      cursor: pointer;
-      transition: 0.3s;
-    }
-    button:hover {
-      background: #0088cc;
-    }
-    /* Mod Circle */
+    
+    /* --- Mod Circle --- */
     .mod-circle {
       position: absolute;
       top: 10px;
       left: 10px;
-      width: 40px;
-      height: 40px;
+      width: 50px;
+      height: 50px;
       border-radius: 50%;
       background: #444;
       display: flex;
       justify-content: center;
       align-items: center;
-      cursor: pointer;
       font-weight: bold;
       color: white;
       z-index: 50;
+      cursor: pointer;
+      font-size: 18px;
     }
-    /* Mod Toolbar */
+    
+    /* --- Mod Toolbar --- */
     #mod-toolbar {
       position: absolute;
-      top: 60px;
+      top: 70px;
       left: 10px;
       z-index: 51;
       display: none;
       flex-direction: column;
     }
     #mod-toolbar button {
-      margin-top: 5px;
-      padding: 5px 10px;
-      background: #00ccff;
-      border: none;
-      font-size: 14px;
+      margin-top: 8px;
+      padding: 8px 12px;
+      border: 1px solid #1b8f1f;
+      font-size: 16px;
       cursor: pointer;
+      border-radius: 6px;
     }
-    /* Online Users Panel */
+    
+    /* --- Online Users Panel --- */
     #online-users-panel {
       position: fixed;
       top: 0;
       right: 0;
-      width: 200px;
+      width: 220px;
       height: 100%;
-      background: rgba(0, 0, 50, 0.8);
-      color: white;
+      background: #ffffff;
+      color: #000;
       overflow-y: auto;
-      padding: 10px;
-      box-shadow: -2px 0 5px rgba(0,0,0,0.5);
+      padding: 15px;
+      box-shadow: -2px 0 8px rgba(0,0,0,0.3);
       z-index: 60;
+      border: 2px solid #1b8f1f;
     }
     #online-users-panel h3 {
       text-align: center;
+      font-size: 20px;
+      color: #2fa82d;
     }
     #online-users-list {
       list-style: none;
       padding: 0;
       margin: 0;
+      font-size: 18px;
     }
     #online-users-list li {
-      margin-bottom: 5px;
-      padding: 5px;
-      border-bottom: 1px solid #00ccff;
+      margin-bottom: 8px;
+      padding: 8px;
+      border-bottom: 1px solid #1b8f1f;
     }
-    /* Shared Drawing Canvas */
+    
+    /* --- Shared Drawing Canvas --- */
     #drawing-canvas {
       position: absolute;
       top: 0;
@@ -262,6 +280,7 @@
   </style>
 </head>
 <body>
+  <!-- (Starfield removed) -->
   <div class="stars"></div>
   
   <!-- Shared Drawing Canvas -->
@@ -276,26 +295,26 @@
   <!-- Mod Circle -->
   <div class="mod-circle" onclick="enterModPassword()">?</div>
   
-  <!-- Mod Toolbar (visible only for mods) -->
+  <!-- Mod Toolbar -->
   <div id="mod-toolbar">
-    <button id="toggle-draw-btn">Toggle Draw</button>
-    <button id="clear-board-btn">Clear Board</button>
-    <button id="show-ip-btn">Show IP</button>
-    <button id="kick-user-btn">Kick User</button>
-    <button id="popup-btn">Popup</button>
-    <button id="manage-mod-btn">Manage Mods</button>
-    <button id="clear-chat-btn">Clear Chat</button>
-    <button id="toggle-mute-btn">Mute/Unmute User</button>
-    <button id="toggle-starfield-btn">Toggle Starfield</button>
-    <button id="highlight-msg-btn">Highlight Message</button>
-    <button id="send-user-alert-btn">User Alert</button>
+    <button class="glossy-button" id="toggle-draw-btn">Toggle Draw</button>
+    <button class="glossy-button" id="clear-board-btn">Clear Board</button>
+    <button class="glossy-button" id="show-ip-btn">Show IP</button>
+    <button class="glossy-button" id="kick-user-btn">Kick User</button>
+    <button class="glossy-button" id="popup-btn">Popup</button>
+    <button class="glossy-button" id="manage-mod-btn">Manage Mods</button>
+    <button class="glossy-button" id="clear-chat-btn">Clear Chat</button>
+    <button class="glossy-button" id="toggle-mute-btn">Mute/Unmute User</button>
+    <button class="glossy-button" id="toggle-starfield-btn">Toggle Starfield</button>
+    <button class="glossy-button" id="highlight-msg-btn">Highlight Message</button>
+    <button class="glossy-button" id="send-user-alert-btn">User Alert</button>
   </div>
   
   <!-- Mod Manager Modal -->
   <div id="mod-manager-modal" class="modal">
     <h3>Online Users</h3>
     <div id="mod-manager-list"></div>
-    <button class="close-btn" id="close-mod-manager">Close</button>
+    <button class="glossy-button close-btn" id="close-mod-manager">Close</button>
   </div>
   
   <!-- User Alert Modal -->
@@ -305,15 +324,15 @@
       <option value="">Select a user</option>
     </select>
     <input type="text" id="user-alert-message" placeholder="Enter alert message">
-    <button id="send-alert-btn">Send Alert</button>
-    <button class="close-btn" id="close-user-alert-modal">Close</button>
+    <button class="glossy-button" id="send-alert-btn">Send Alert</button>
+    <button class="glossy-button close-btn" id="close-user-alert-modal">Close</button>
   </div>
   
   <!-- Login Screen -->
   <div class="login-screen">
     <h2>🚀 Enter your name</h2>
     <input type="text" id="nameInput" placeholder="Enter name">
-    <button onclick="enterChat()">Join Chat</button>
+    <button class="glossy-button" onclick="enterChat()">Join Chat</button>
   </div>
 
   <!-- Chat UI -->
@@ -322,7 +341,7 @@
     <div id="chat-box"></div>
     <input type="text" id="message" placeholder="Type a message">
     <input type="text" id="image-url" placeholder="Paste image URL (optional)">
-    <button id="send-btn">Send</button>
+    <button class="glossy-button" id="send-btn">Send</button>
   </div>
 
   <script type="module">
@@ -402,8 +421,7 @@
     onValue(ref(db, "users"), (snapshot) => {
       onlineUsersList.innerHTML = "";
       const now = Date.now();
-      // Threshold set to 2 minutes (120,000 ms)
-      const threshold = 120000;
+      const threshold = 120000; // 2 minutes
       snapshot.forEach(childSnap => {
         const userData = childSnap.val();
         if(userData.lastActive && (now - userData.lastActive) < threshold) {
@@ -420,7 +438,6 @@
       if (!username) return alert("Enter a name!");
       userIP = generateRandomIP();
       const userRef = ref(db, "users/" + username);
-      // Set initial user record with lastActive timestamp
       set(userRef, { ip: userIP, isMod: false, lastActive: Date.now() });
       onDisconnect(userRef).remove();
       
@@ -456,7 +473,6 @@
       push(ref(db, "messages"), { user: "System", text: `${username} has joined the chat`, system: true });
       listenForUserPopups();
 
-      // Start heartbeat updates every minute
       setInterval(() => {
         update(ref(db, "users/" + username), { lastActive: Date.now() });
       }, 60000);
@@ -504,6 +520,7 @@
         const delBtn = document.createElement("button");
         delBtn.textContent = "Delete";
         delBtn.style.marginLeft = "10px";
+        delBtn.classList.add("glossy-button");
         delBtn.addEventListener("click", function() {
           if(confirm("Are you sure you want to delete this message?")) {
             remove(ref(db, "messages/" + snapshot.key));
@@ -637,6 +654,7 @@
           row.innerHTML = `<span>${userName} (${userIP})</span>`;
           const toggleBtn = document.createElement("button");
           toggleBtn.textContent = isUserMod ? "Remove Mod" : "Give Mod";
+          toggleBtn.classList.add("glossy-button");
           toggleBtn.addEventListener("click", () => {
             update(ref(db, "users/" + userName), { isMod: !isUserMod })
             .then(() => {
