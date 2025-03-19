@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Pode's Chat</title>
   <style>
-    /* Ensure html and body take full viewport height */
+    /* --- Ensure full viewport height --- */
     html, body {
       height: 100%;
       margin: 0;
@@ -156,10 +156,10 @@
       text-align: center;
       z-index: 30;
       border: 2px solid #1b8f1f;
-      position: relative;
+      position: absolute;
+      left: 50%;
       top: 50%;
-      transform: translateY(-50%);
-      margin: 0 auto;
+      transform: translate(-50%, -50%);
     }
     .chat-container h2 {
       font-size: 26px;
