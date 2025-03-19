@@ -4,112 +4,53 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pode Games</title>
+  <link rel="stylesheet" href="https://unpkg.com/xp.css" />
   <style>
-    /* Ensure full viewport height */
-    html, body {
-      height: 100%;
-      margin: 0;
-      padding: 0;
-    }
-    
-    /* --- Custom Font & Background Image --- */
-    @font-face { 
-      font-family: "Segoe UI Semilight";
-      src: url(https://frutigeraeroarchive.org/fonts/segoe_ui_semilight.ttf) format("truetype");
-    }
-    body {  
-      background: url("https://preview.redd.it/is-this-water-wallpaper-frutiger-aero-v0-bxfouw461i3b1.jpg?auto=webp&s=206c59e9b8bc46f8c79023b07b61c5b2b772a088") no-repeat center center fixed;
+    body {
+      background: url("https://upload.wikimedia.org/wikipedia/en/5/5f/Bliss_%28Windows_XP%29.png") no-repeat center center fixed;
       background-size: cover;
-      font-family: "Segoe UI Semilight", Tahoma, Geneva, Verdana, sans-serif;
-      color: #000;
-      overflow: hidden;
-      position: relative;
-      cursor: default;
-    }
-    
-    /* --- Header Styles --- */
-    #mainHeader { 
-      background: linear-gradient(180deg, rgba(148,148,148,0.9) 0%, rgba(71,71,71,0.9) 20%, rgba(19,19,19,0.9) 40%, rgba(7,7,7,0.93) 100%);
-      box-shadow: 0 14px 28px rgba(0,0,0,0.25), 0 10px 10px rgba(0,0,0,0.22);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      position: fixed;
-      top: 0;
-      width: 100%;
-      padding: 10px;
-      z-index: 100;
-      animation: fadeIn 2s ease;
-    }
-    #mainHeader h1 {
       margin: 0;
-      font-size: 30px;
-      color: #fff;
-      text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+      padding: 20px;
+      height: 100vh;
+      box-sizing: border-box;
     }
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(-20px); }
-      to { opacity: 1; transform: translateY(0); }
+
+    .window {
+      width: 80%;
+      max-width: 800px;
+      margin: 0 auto;
     }
-    
-    /* --- Game Buttons Styling (Glossy Blue) --- */
-    .game-buttons {
-      text-align: center;
-      margin-top: 120px; /* space for fixed header */
-    }
-    .game-button {
-      position: relative;
-      display: inline-block;
-      padding: 15px 30px;
-      margin: 15px;
-      font-size: 20px;
+
+    .title-bar-text {
       font-weight: bold;
-      background: linear-gradient(180deg, #4a90e2, #2a6cc7);
-      border: 1px solid #1d3a8c;
-      color: #fff;
-      border-radius: 12px;
-      text-shadow: 1px 1px 2px #000;
-      box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-      transition: transform 0.2s, background 0.3s;
-      cursor: pointer;
-      overflow: hidden;
     }
-    .game-button:hover {
-      transform: translateY(-3px);
-      background: linear-gradient(180deg, #2a6cc7, #4a90e2);
+
+    .window-body {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      padding: 20px;
     }
-    .game-button:active {
-      transform: translateY(1px);
-    }
-    .game-button::after {
-      content: "";
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 50%;
-      background: linear-gradient(180deg, rgba(255,255,255,0.8) 0%, rgba(255,255,255,0) 100%);
-      pointer-events: none;
-      border-top-left-radius: inherit;
-      border-top-right-radius: inherit;
-    }
-    
-    main {
-      padding-top: 90px;
-      text-align: center;
-      color: #000;
+
+    .game-button {
+      margin: 10px;
+      min-width: 120px;
     }
   </style>
 </head>
 <body>
-  <!-- Header -->
-  <header id="mainHeader">
-    <h1>Pode Games</h1>
-  </header>
-  
-  <!-- Main Content -->
-  <main>
-    <div class="game-buttons">
+  <div class="window">
+    <div class="title-bar">
+      <div class="title-bar-text">
+        Pode Games
+      </div>
+      <div class="title-bar-controls">
+        <button aria-label="Minimize"></button>
+        <button aria-label="Maximize"></button>
+        <button aria-label="Close"></button>
+      </div>
+    </div>
+    <div class="window-body">
       <button onclick="alert('Open Game clicked!')" class="game-button">Open Game</button>
       <button onclick="location.href='./math-calculator.html';" class="game-button">Basketball Stars</button>
       <button onclick="location.href='./slope-calc.html';" class="game-button">Slope</button>
@@ -121,6 +62,6 @@
       <button onclick="location.href='./saftey.html';" class="game-button">House of Hazards</button>
       <button onclick="alert('Cool Button clicked!')" class="game-button">Cool Button</button>
     </div>
-  </main>
+  </div>
 </body>
 </html>
