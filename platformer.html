@@ -59,7 +59,7 @@
     import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-analytics.js";
     import { getDatabase, ref, set, onChildAdded, onChildChanged, onChildRemoved, push, get } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-database.js";
     
-    // Firebase configuration (using your config)
+    // Firebase configuration
     const firebaseConfig = {
       apiKey: "AIzaSyCssnOBJd20Q46CVF4iuuygLeqaMCqInhk",
       authDomain: "platformer-e205c.firebaseapp.com",
@@ -69,20 +69,27 @@
       appId: "1:350613298525:web:dddba101b6545241dadcb4",
       measurementId: "G-3DT5KYV4MS"
     };
-    
-    // Initialize Firebase
     const appFirebase = initializeApp(firebaseConfig);
     const analytics = getAnalytics(appFirebase);
     const db = getDatabase(appFirebase);
     
-    // Constants used throughout
+    // Game Constants
     const SHIELD_RADIUS = 50;
-    const explosionRadius = 75;    // Base explosion radius (for damage calculations)
-    const explosionDamage = 100;   // Base explosion damage
+    const explosionRadius = 75;      // Base explosion radius (for damage calculations)
+    const explosionDamage = 100;     // Base explosion damage
+    const TANK_SPEED = 150;
+    const TANK_ROTATION_SPEED = 0.04;  // radians per frame
+    const BASE_HEALTH = 100;
     
-    // --- Firebase Cleanup ---
-    // When the login menu is displayed (i.e. before starting a game), check if no players are online.
-    // If so, clear stale data from "players", "bullets", and "explosions" nodes.
+    // Weapon parameters
+    const normalDamage = 25, normalCooldown = 500, normalSpeed = 300;
+    const rpgDamage = 50, rpgCooldown = 1000, rpgSpeed = 200;
+    const rapidDamage = 15, rapidCooldown = 200, rapidSpeed = 300;
+    
+    let username = "";
+    let playerId = "";
+    
+    // Firebase cleanup: clear stale data if no players are online.
     function checkAndClearDatabase(){
       const playersRef = ref(db, "players");
       get(playersRef).then((snapshot) => {
@@ -95,16 +102,11 @@
     }
     checkAndClearDatabase();
     
-    // Global login variables
-    let username = "";
-    let playerId = "";
-    
     // Login handling
     document.getElementById("login-button").addEventListener("click", () => {
       const input = document.getElementById("username-input").value.trim();
       if (input !== "") {
         username = input;
-        // Create a unique id
         playerId = "player_" + Math.floor(Math.random() * 10000);
         document.getElementById("login-container").style.display = "none";
         document.getElementById("game-container").style.display = "block";
@@ -112,20 +114,19 @@
       }
     });
     
-    // --- Game Code ---
     function startGame() {
-      let scene; // will hold the current Phaser scene
-      let localUsernameText; // displays the local player's username above their tank
-      let lastFirebaseUpdate = 0; // for throttling Firebase updates
+      let scene;
+      let localUsernameText;
+      let lastFirebaseUpdate = 0;
       
       const config = {
         type: Phaser.AUTO,
         parent: "game-container",
         scale: {
-          mode: Phaser.Scale.FIT,
+          mode: Phaser.Scale.RESIZE, // responsive fullscreen
           autoCenter: Phaser.Scale.CENTER_BOTH,
-          width: 800,
-          height: 600,
+          width: window.innerWidth,
+          height: window.innerHeight,
         },
         physics: {
           default: "arcade",
@@ -142,159 +143,13 @@
       let localWeaponText;
       let currentWeapon = 1; // 1 = Normal, 2 = RPG, 3 = Rapid Fire
       let bulletGroup;
-      let bulletMap = {};  // tracks bullets from Firebase
-      let otherPlayers = {};  // remote players
-      
-      // Create obstacles
-      let crates;
-      
-      // Game parameters
-      const TANK_SPEED = 150;
-      const TANK_ROTATION_SPEED = 0.04; // radians per frame
-      const BASE_HEALTH = 100;
-      
-      // Weapon parameters:
-      // Normal: 25 damage, 500ms cooldown, 300 px/s
-      const normalDamage = 25;
-      const normalCooldown = 500;
-      const normalSpeed = 300;
-      // RPG: 50 damage, 1000ms cooldown, 200 px/s
-      const rpgDamage = 50;
-      const rpgCooldown = 1000;
-      const rpgSpeed = 200;
-      // Rapid Fire: 15 damage, 200ms cooldown, 300 px/s
-      const rapidDamage = 15;
-      const rapidCooldown = 200;
-      const rapidSpeed = 300;
-      
-      let lastShotTime = 0;
+      let bulletMap = {};  // Tracks bullets by Firebase key
+      let otherPlayers = {};  // Remote players object
       let gameOverTriggered = false;
-      
-      // --- Helper Functions ---
-      // Draw a health bar above a tank
-      function drawHealthBar(tank, healthBar, currentHealth, maxHealth) {
-        const barWidth = 40;
-        const barHeight = 6;
-        const x = tank.x - barWidth / 2;
-        const y = tank.y - tank.displayHeight / 2 - 10;
-        healthBar.clear();
-        healthBar.fillStyle(0x000000);
-        healthBar.fillRect(x, y, barWidth, barHeight);
-        let healthPercent = Phaser.Math.Clamp(currentHealth / maxHealth, 0, 1);
-        healthBar.fillStyle(0x00ff00);
-        healthBar.fillRect(x + 1, y + 1, (barWidth - 2) * healthPercent, barHeight - 2);
-      }
-      
-      // Trigger explosion for RPG bullets. If the shooter is "poopmonger", use the ultra-enhanced explosion.
-      function triggerExplosion(bullet, bulletKey) {
-        // Remove the bullet from Firebase
-        set(ref(db, "bullets/" + bulletKey), null);
-        
-        // Determine if the explosion should be enhanced (if the shooter is poopmonger)
-        if (bullet.shooter === playerId && username.toLowerCase() === "poopmonger") {
-          // Push an explosion event to Firebase so all clients see it
-          const explosionRef = push(ref(db, "explosions"));
-          set(explosionRef, {
-            x: bullet.x,
-            y: bullet.y,
-            enhanced: true,
-            shooter: playerId,
-            timestamp: Date.now()
-          });
-          // Locally, play the ultra-enhanced explosion animation
-          let explosion = scene.add.circle(bullet.x, bullet.y, explosionRadius * 10, 0xff0000, 1);
-          scene.tweens.add({
-            targets: explosion,
-            scale: 5,
-            alpha: 0,
-            duration: 2000,
-            ease: 'Cubic.easeOut',
-            onComplete: () => explosion.destroy()
-          });
-          scene.cameras.main.shake(600, 0.1);
-          let particles = scene.add.particles('bullet');
-          let emitter = particles.createEmitter({
-            x: bullet.x,
-            y: bullet.y,
-            speed: { min: -1000, max: 1000 },
-            angle: { min: 0, max: 360 },
-            scale: { start: 3, end: 0 },
-            blendMode: 'ADD',
-            lifespan: 2000,
-            quantity: 500
-          });
-          scene.time.delayedCall(2000, () => { particles.destroy(); });
-        } else {
-          // Normal explosion effect
-          let explosion = scene.add.circle(bullet.x, bullet.y, explosionRadius, 0xffaa00, 0.5);
-          scene.tweens.add({
-            targets: explosion,
-            scale: 2,
-            alpha: 0,
-            duration: 800,
-            ease: 'Cubic.easeOut',
-            onComplete: () => explosion.destroy()
-          });
-          scene.cameras.main.shake(250, 0.02);
-          let particles = scene.add.particles('bullet');
-          let emitter = particles.createEmitter({
-            x: bullet.x,
-            y: bullet.y,
-            speed: { min: -300, max: 300 },
-            angle: { min: 0, max: 360 },
-            scale: { start: 1, end: 0 },
-            blendMode: 'ADD',
-            lifespan: 800,
-            quantity: 100
-          });
-          scene.time.delayedCall(800, () => { particles.destroy(); });
-        }
-        
-        // Damage calculations (using an effective explosion radius)
-        const effectiveRadius = explosionRadius * 1.5;
-        // Damage local tank if within range
-        const dx = localTank.x - bullet.x;
-        const dy = localTank.y - bullet.y;
-        if (Math.sqrt(dx * dx + dy * dy) <= effectiveRadius) {
-          localTank.health -= explosionDamage;
-          if (localTank.health <= 0 && !gameOverTriggered) {
-            doGameOver();
-          }
-        }
-        // Damage remote tanks
-        for (const pid in otherPlayers) {
-          const remote = otherPlayers[pid].sprite;
-          const dx2 = remote.x - bullet.x;
-          const dy2 = remote.y - bullet.y;
-          if (Math.sqrt(dx2 * dx2 + dy2 * dy2) <= effectiveRadius) {
-            const newHealth = remote.health - explosionDamage;
-            set(ref(db, "players/" + pid), {
-              x: remote.x,
-              y: remote.y,
-              rotation: remote.rotation,
-              username: otherPlayers[pid].username || "",
-              health: newHealth,
-              lastPing: Date.now(),
-              shield: otherPlayers[pid].shieldActive || false
-            });
-          }
-        }
-        if(bullet && bullet.destroy) {
-          bullet.destroy();
-        }
-      }
-      
-      // Show the game over overlay and remove the player from Firebase
-      function doGameOver() {
-        gameOverTriggered = true;
-        localTank.setTint(0xff0000);
-        localTank.setVelocity(0);
-        document.getElementById("gameover-container").style.display = "block";
-        set(ref(db, "players/" + playerId), null);
-      }
+      let lastShotTime = 0;
       
       function preload() {
-        // Create custom tank art
+        // Use the original tank art
         const tankGraphics = this.make.graphics({ x: 0, y: 0, add: false });
         tankGraphics.fillStyle(0x333333, 1);
         tankGraphics.fillRoundedRect(0, 0, 60, 30, 5);
@@ -304,13 +159,13 @@
         tankGraphics.fillRect(38, 13, 20, 4);
         tankGraphics.generateTexture("tank", 60, 30);
         
-        // Create bullet art (shared by all weapons)
+        // Bullet art (shared by all weapons)
         const bulletGraphics = this.make.graphics({ x: 0, y: 0, add: false });
         bulletGraphics.fillStyle(0xff4500, 1);
         bulletGraphics.fillCircle(4, 4, 4);
         bulletGraphics.generateTexture("bullet", 8, 8);
         
-        // Create crate art
+        // Crate art for obstacles
         const crateGraphics = this.make.graphics({ x: 0, y: 0, add: false });
         crateGraphics.fillStyle(0x8B4513, 1);
         crateGraphics.fillRect(0, 0, 50, 50);
@@ -323,43 +178,45 @@
         scene = this;
         this.cameras.main.setBackgroundColor(0x808080);
         
-        // Create crates as obstacles
-        crates = this.physics.add.staticGroup();
+        // Create crates as obstacles (players cannot pass through)
+        let w = this.cameras.main.width;
+        let h = this.cameras.main.height;
+        let crates = this.physics.add.staticGroup();
         crates.create(150, 150, "crate");
-        crates.create(650, 150, "crate");
-        crates.create(150, 450, "crate");
-        crates.create(650, 450, "crate");
-        crates.create(400, 300, "crate");
+        crates.create(w - 150, 150, "crate");
+        crates.create(150, h - 150, "crate");
+        crates.create(w - 150, h - 150, "crate");
+        crates.create(w / 2, h / 2, "crate");
         
         // Create local tank
-        localTank = this.physics.add.sprite(this.cameras.main.width / 2, this.cameras.main.height / 2, "tank");
+        localTank = this.physics.add.sprite(w/2, h/2, "tank");
         localTank.setCollideWorldBounds(true);
         localTank.health = BASE_HEALTH;
         localTank.maxHealth = BASE_HEALTH;
         localTank.setOrigin(0.5);
         this.physics.add.collider(localTank, crates);
         
-        // If local player's name is "pranav1", add a shield graphic
+        // Add shield graphic if local player's name is "pranav1"
         if (username.toLowerCase() === "pranav1") {
           localTank.shieldGraphic = this.add.circle(localTank.x, localTank.y, SHIELD_RADIUS, 0x00ffff, 0.3);
         }
         
-        // Local health bar and username text
         localHealthBar = this.add.graphics();
         localUsernameText = this.add.text(localTank.x, localTank.y - localTank.displayHeight - 15, username, { fontSize: '12px', fill: '#fff' }).setOrigin(0.5);
         
-        // Bullet group and collision with crates
+        // Create a bullet group and add collision with crates
         bulletGroup = this.physics.add.group();
         this.physics.add.collider(bulletGroup, crates, (bullet, crate) => {
+          // For RPG bullets, trigger explosion and mark bullet as processed
           if (bullet.weaponType === 2) {
             triggerExplosion(bullet, bullet.bulletId);
           } else {
             set(ref(db, "bullets/" + bullet.bulletId), null);
             bullet.destroy();
           }
-        }, null, this);
+        });
         
-        // Set up controls: WASD for movement, SPACE for shooting, keys 1-3 for weapon change
+        // Set up controls
         keys = this.input.keyboard.addKeys({
           w: Phaser.Input.Keyboard.KeyCodes.W,
           a: Phaser.Input.Keyboard.KeyCodes.A,
@@ -379,19 +236,28 @@
         onChildAdded(playersRef, (data) => {
           const pid = data.key;
           if (pid === playerId) return;
-          const dataVal = data.val();
+          const d = data.val();
           if (!otherPlayers[pid]) {
-            const remote = scene.physics.add.sprite(dataVal.x, dataVal.y, "tank");
+            const remote = scene.physics.add.sprite(d.x, d.y, "tank");
             remote.setCollideWorldBounds(true);
-            remote.health = dataVal.health;
+            remote.health = d.health;
             remote.maxHealth = BASE_HEALTH;
-            remote.rotation = dataVal.rotation;
+            remote.rotation = d.rotation;
             scene.physics.add.collider(remote, crates);
             let healthBar = scene.add.graphics();
-            let usernameText = scene.add.text(dataVal.x, dataVal.y - remote.displayHeight - 15, dataVal.username, { fontSize: '12px', fill: '#fff' }).setOrigin(0.5);
-            otherPlayers[pid] = { sprite: remote, healthBar: healthBar, usernameText: usernameText, lastPing: dataVal.lastPing, username: dataVal.username };
-            if (dataVal.shield) {
-              otherPlayers[pid].shield = scene.add.circle(dataVal.x, dataVal.y, SHIELD_RADIUS, 0x00ffff, 0.3);
+            let usernameText = scene.add.text(d.x, d.y - remote.displayHeight - 15, d.username, { fontSize: '12px', fill: '#fff' }).setOrigin(0.5);
+            otherPlayers[pid] = { 
+              sprite: remote, 
+              healthBar: healthBar, 
+              usernameText: usernameText, 
+              lastPing: d.lastPing, 
+              username: d.username,
+              targetX: d.x,
+              targetY: d.y,
+              targetRotation: d.rotation
+            };
+            if (d.shield) {
+              otherPlayers[pid].shield = scene.add.circle(d.x, d.y, SHIELD_RADIUS, 0x00ffff, 0.3);
               otherPlayers[pid].shieldActive = true;
             } else {
               otherPlayers[pid].shieldActive = false;
@@ -401,36 +267,26 @@
         onChildChanged(playersRef, (data) => {
           const pid = data.key;
           if (pid === playerId) return;
-          const dataVal = data.val();
+          const d = data.val();
           if (otherPlayers[pid]) {
-            const remote = otherPlayers[pid].sprite;
-            remote.x = dataVal.x;
-            remote.y = dataVal.y;
-            remote.rotation = dataVal.rotation;
-            remote.health = dataVal.health;
-            otherPlayers[pid].lastPing = dataVal.lastPing;
-            otherPlayers[pid].username = dataVal.username;
-            otherPlayers[pid].usernameText.setText(dataVal.username);
-            if (dataVal.shield) {
+            // Store target values for smooth interpolation.
+            otherPlayers[pid].targetX = d.x;
+            otherPlayers[pid].targetY = d.y;
+            otherPlayers[pid].targetRotation = d.rotation;
+            otherPlayers[pid].lastPing = d.lastPing;
+            otherPlayers[pid].username = d.username;
+            otherPlayers[pid].usernameText.setText(d.username);
+            if (d.shield) {
               if (!otherPlayers[pid].shield) {
-                otherPlayers[pid].shield = scene.add.circle(dataVal.x, dataVal.y, SHIELD_RADIUS, 0x00ffff, 0.3);
+                otherPlayers[pid].shield = scene.add.circle(d.x, d.y, SHIELD_RADIUS, 0x00ffff, 0.3);
               } else {
-                otherPlayers[pid].shield.setPosition(dataVal.x, dataVal.y);
+                otherPlayers[pid].shield.setPosition(d.x, d.y);
               }
               otherPlayers[pid].shieldActive = true;
             } else if (otherPlayers[pid].shield) {
               otherPlayers[pid].shield.destroy();
               otherPlayers[pid].shield = null;
               otherPlayers[pid].shieldActive = false;
-            }
-            if (remote.health <= 0) {
-              remote.destroy();
-              otherPlayers[pid].healthBar.destroy();
-              otherPlayers[pid].usernameText.destroy();
-              if(otherPlayers[pid].shield) {
-                otherPlayers[pid].shield.destroy();
-              }
-              delete otherPlayers[pid];
             }
           }
         });
@@ -460,6 +316,8 @@
           bullet.body.allowGravity = false;
           bullet.setVelocity(bData.vx, bData.vy);
           bullet.bulletId = data.key;
+          // Use a guard flag so the bullet is processed only once.
+          bullet.exploded = bData.exploded || false;
           bulletMap[data.key] = bullet;
         });
         onChildRemoved(bulletsRef, (data) => {
@@ -469,46 +327,148 @@
           }
         });
         
-        // --- Firebase Listener for Explosion Events ---
+        // --- Firebase Listener for Explosion Events (with particle effects) ---
         const explosionsRef = ref(db, "explosions");
         onChildAdded(explosionsRef, (data) => {
           const expData = data.val();
-          if(expData && expData.enhanced) {
-            // Play the enhanced explosion animation (for poopmonger explosions) on all clients
-            let explosion = scene.add.circle(expData.x, expData.y, explosionRadius * 10, 0xff0000, 1);
-            scene.tweens.add({
-              targets: explosion,
-              scale: 5,
-              alpha: 0,
-              duration: 2000,
-              ease: 'Cubic.easeOut',
-              onComplete: () => explosion.destroy()
-            });
-            scene.cameras.main.shake(600, 0.1);
-            let particles = scene.add.particles('bullet');
-            let emitter = particles.createEmitter({
-              x: expData.x,
-              y: expData.y,
-              speed: { min: -1000, max: 1000 },
-              angle: { min: 0, max: 360 },
-              scale: { start: 3, end: 0 },
-              blendMode: 'ADD',
-              lifespan: 2000,
-              quantity: 500
-            });
-            scene.time.delayedCall(2000, () => { particles.destroy(); });
+          if(expData){
+            if(expData.enhanced){
+              let explosion = scene.add.circle(expData.x, expData.y, explosionRadius * 10, 0xff0000, 1);
+              scene.tweens.add({
+                targets: explosion,
+                scale: 5,
+                alpha: 0,
+                duration: 2000,
+                ease: 'Cubic.easeOut',
+                onComplete: () => explosion.destroy()
+              });
+              scene.cameras.main.shake(600, 0.1);
+              let particles = scene.add.particles('bullet');
+              let emitter = particles.createEmitter({
+                x: expData.x,
+                y: expData.y,
+                speed: { min: -1000, max: 1000 },
+                angle: { min: 0, max: 360 },
+                scale: { start: 3, end: 0 },
+                blendMode: 'ADD',
+                lifespan: 2000,
+                quantity: 500
+              });
+              scene.time.delayedCall(2000, () => { particles.destroy(); });
+            } else {
+              let explosion = scene.add.circle(expData.x, expData.y, explosionRadius, 0xffaa00, 0.5);
+              scene.tweens.add({
+                targets: explosion,
+                scale: 2,
+                alpha: 0,
+                duration: 800,
+                ease: 'Cubic.easeOut',
+                onComplete: () => explosion.destroy()
+              });
+              scene.cameras.main.shake(250, 0.02);
+              let particles = scene.add.particles('bullet');
+              let emitter = particles.createEmitter({
+                x: expData.x,
+                y: expData.y,
+                speed: { min: -300, max: 300 },
+                angle: { min: 0, max: 360 },
+                scale: { start: 1, end: 0 },
+                blendMode: 'ADD',
+                lifespan: 800,
+                quantity: 100
+              });
+              scene.time.delayedCall(800, () => { particles.destroy(); });
+            }
           }
           set(ref(db, "explosions/" + data.key), null);
         });
         
-        // Restart game on button click
         document.getElementById("restart-button").addEventListener("click", () => {
           window.location.reload();
         });
       }
       
+      // Modified triggerExplosion with guard flag
+      function triggerExplosion(bullet, bulletKey) {
+        if(bullet.exploded) return; // already processed
+        bullet.exploded = true;
+        // Remove bullet data from Firebase immediately.
+        set(ref(db, "bullets/" + bulletKey), null);
+        
+        // Create explosion event with particle effects.
+        if (bullet.shooter === playerId && username.toLowerCase() === "poopmonger") {
+          const explosionRef = push(ref(db, "explosions"));
+          set(explosionRef, {
+            x: bullet.x,
+            y: bullet.y,
+            enhanced: true,
+            shooter: playerId,
+            timestamp: Date.now()
+          });
+        } else {
+          const explosionRef = push(ref(db, "explosions"));
+          set(explosionRef, {
+            x: bullet.x,
+            y: bullet.y,
+            enhanced: false,
+            shooter: playerId,
+            timestamp: Date.now()
+          });
+        }
+        
+        // Damage calculations
+        const effectiveRadius = explosionRadius * 1.5;
+        let dx = localTank.x - bullet.x, dy = localTank.y - bullet.y;
+        if (Math.hypot(dx, dy) <= effectiveRadius) {
+          localTank.health -= explosionDamage;
+          if (localTank.health <= 0 && !gameOverTriggered) { doGameOver(); }
+        }
+        for (const pid in otherPlayers) {
+          const remote = otherPlayers[pid].sprite;
+          let dx2 = remote.x - bullet.x, dy2 = remote.y - bullet.y;
+          if (Math.hypot(dx2, dy2) <= effectiveRadius) {
+            const newHealth = remote.health - explosionDamage;
+            set(ref(db, "players/" + pid), {
+              x: remote.x,
+              y: remote.y,
+              rotation: remote.rotation,
+              username: otherPlayers[pid].username || "",
+              health: newHealth,
+              lastPing: Date.now(),
+              shield: otherPlayers[pid].shieldActive || false
+            });
+          }
+        }
+        // Destroy the bullet locally and remove it from our bulletMap.
+        if(bullet && bullet.destroy){
+          bullet.destroy();
+          delete bulletMap[bulletKey];
+        }
+      }
+      
       function update(time, delta) {
         if (gameOverTriggered) return;
+        
+        // Smooth interpolation for remote players.
+        for (const pid in otherPlayers) {
+          let remote = otherPlayers[pid];
+          remote.sprite.x += (remote.targetX - remote.sprite.x) * 0.1;
+          remote.sprite.y += (remote.targetY - remote.sprite.y) * 0.1;
+          remote.sprite.rotation += (remote.targetRotation - remote.sprite.rotation) * 0.1;
+          if(remote.shield && remote.shieldActive){
+            remote.shield.setPosition(remote.sprite.x, remote.sprite.y);
+          }
+          remote.healthBar.clear();
+          const barWidth = 40, barHeight = 6;
+          const x = remote.sprite.x - barWidth/2;
+          const y = remote.sprite.y - remote.sprite.displayHeight/2 - 10;
+          remote.healthBar.fillStyle(0x000000);
+          remote.healthBar.fillRect(x, y, barWidth, barHeight);
+          let healthPercent = Phaser.Math.Clamp(remote.sprite.health / remote.sprite.maxHealth, 0, 1);
+          remote.healthBar.fillStyle(0x00ff00);
+          remote.healthBar.fillRect(x+1, y+1, (barWidth-2)*healthPercent, barHeight-2);
+          remote.usernameText.setPosition(remote.sprite.x, remote.sprite.y - remote.sprite.displayHeight - 15);
+        }
         
         // Weapon selection
         if (Phaser.Input.Keyboard.JustDown(weaponKeys.one)) {
@@ -524,7 +484,6 @@
           localWeaponText.setText("Weapon: Rapid Fire");
         }
         
-        // Determine weapon parameters
         let bulletSpeedUsed, bulletDamageUsed, cooldownUsed;
         switch(currentWeapon) {
           case 1:
@@ -546,12 +505,8 @@
         
         // Tank movement (WASD)
         localTank.setVelocity(0);
-        if (keys.a.isDown) {
-          localTank.rotation -= TANK_ROTATION_SPEED;
-        }
-        if (keys.d.isDown) {
-          localTank.rotation += TANK_ROTATION_SPEED;
-        }
+        if (keys.a.isDown) { localTank.rotation -= TANK_ROTATION_SPEED; }
+        if (keys.d.isDown) { localTank.rotation += TANK_ROTATION_SPEED; }
         if (keys.w.isDown) {
           localTank.body.velocity.x = Math.cos(localTank.rotation) * TANK_SPEED;
           localTank.body.velocity.y = Math.sin(localTank.rotation) * TANK_SPEED;
@@ -561,18 +516,17 @@
           localTank.body.velocity.y = -Math.sin(localTank.rotation) * TANK_SPEED;
         }
         
-        // Update shield position (if applicable)
+        // Update shield graphic if applicable.
         if (username.toLowerCase() === "pranav1" && localTank.shieldGraphic) {
           localTank.shieldGraphic.setPosition(localTank.x, localTank.y);
         }
         
-        // Shooting logic:
-        // Special case: if username is "reed" and using RPG, rapid-fire a shotgun spread while holding space
+        // Shooting logic.
         if (currentWeapon === 2 && username.toLowerCase() === "reed" && spaceKey.isDown && time > lastShotTime) {
           const numPellets = 50;
           const spreadRange = Phaser.Math.DegToRad(1000);
           for (let i = 0; i < numPellets; i++) {
-            let offset = -spreadRange / 2 + (i * spreadRange / (numPellets - 1));
+            let offset = -spreadRange/2 + (i * spreadRange/(numPellets - 1));
             let angle = localTank.rotation + offset;
             let bulletDir = new Phaser.Math.Vector2(Math.cos(angle), Math.sin(angle));
             let vx = bulletDir.x * bulletSpeedUsed;
@@ -592,7 +546,6 @@
           }
           lastShotTime = time;
         }
-        // Special case: if username is "pranav" with RPG, allow rapid fire every 50ms
         else if (currentWeapon === 2 && username.toLowerCase() === "pranav" && spaceKey.isDown && time > lastShotTime + 50) {
           const bulletDir = new Phaser.Math.Vector2(Math.cos(localTank.rotation), Math.sin(localTank.rotation));
           const vx = bulletDir.x * bulletSpeedUsed;
@@ -611,7 +564,6 @@
           set(bulletRef, bulletData);
           lastShotTime = time;
         }
-        // Default shooting behavior for all other cases
         else if (Phaser.Input.Keyboard.JustDown(spaceKey) && time > lastShotTime + cooldownUsed) {
           const bulletDir = new Phaser.Math.Vector2(Math.cos(localTank.rotation), Math.sin(localTank.rotation));
           const vx = bulletDir.x * bulletSpeedUsed;
@@ -631,16 +583,14 @@
           lastShotTime = time;
         }
         
-        // Bullet collision detection and cleanup
+        // Bullet collision detection and cleanup.
         for (const key in bulletMap) {
           const b = bulletMap[key];
-          // Remove bullets that go off-screen
           if (b.x < 0 || b.x > scene.cameras.main.width || b.y < 0 || b.y > scene.cameras.main.height) {
             set(ref(db, "bullets/" + key), null);
             b.destroy();
             continue;
           }
-          // If the bullet was fired by another player
           if (b.shooter !== playerId) {
             if (username.toLowerCase() === "pranav1" && localTank.shieldGraphic) {
               const distanceToShield = Phaser.Math.Distance.Between(b.x, b.y, localTank.x, localTank.y);
@@ -656,25 +606,31 @@
                   y: b.y,
                   vx: newVx,
                   vy: newVy,
-                  timestamp: Date.now()
+                  timestamp: Date.now(),
+                  reflected: true
                 });
                 continue;
               }
             }
             if (Phaser.Geom.Intersects.RectangleToRectangle(b.getBounds(), localTank.getBounds())) {
-              if (b.weaponType === 2) {
-                triggerExplosion(b, key);
-              } else {
+              if (b.weaponType === 2) { triggerExplosion(b, key); }
+              else {
                 localTank.health -= b.damage;
-                if (localTank.health <= 0 && !gameOverTriggered) {
-                  doGameOver();
-                }
+                if (localTank.health <= 0 && !gameOverTriggered) { doGameOver(); }
                 set(ref(db, "bullets/" + key), null);
                 b.destroy();
               }
               continue;
             }
-          } else {
+          }
+          else {
+            if(b.reflected && Phaser.Geom.Intersects.RectangleToRectangle(b.getBounds(), localTank.getBounds())){
+              localTank.health -= b.damage;
+              if (localTank.health <= 0 && !gameOverTriggered) { doGameOver(); }
+              set(ref(db, "bullets/" + key), null);
+              b.destroy();
+              continue;
+            }
             let deflected = false;
             for (const pid in otherPlayers) {
               if (otherPlayers[pid].shieldActive && otherPlayers[pid].shield) {
@@ -691,7 +647,8 @@
                     y: b.y,
                     vx: newVx,
                     vy: newVy,
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    reflected: true
                   });
                   deflected = true;
                   break;
@@ -702,9 +659,8 @@
             for (const pid in otherPlayers) {
               const remote = otherPlayers[pid].sprite;
               if (Phaser.Geom.Intersects.RectangleToRectangle(b.getBounds(), remote.getBounds())) {
-                if (b.weaponType === 2) {
-                  triggerExplosion(b, key);
-                } else {
+                if (b.weaponType === 2) { triggerExplosion(b, key); }
+                else {
                   const newHealth = remote.health - b.damage;
                   set(ref(db, "players/" + pid), {
                     x: remote.x,
@@ -724,7 +680,7 @@
           }
         }
         
-        // Throttle local player state updates to Firebase (every 100ms)
+        // Throttle Firebase updates every 100ms.
         if (time - lastFirebaseUpdate >= 100) {
           set(ref(db, "players/" + playerId), {
             x: localTank.x,
@@ -738,35 +694,41 @@
           lastFirebaseUpdate = time;
         }
         
-        // Update health bars and username labels
-        drawHealthBar(localTank, localHealthBar, localTank.health, localTank.maxHealth);
+        localHealthBar.clear();
+        const barWidth = 40, barHeight = 6;
+        const x = localTank.x - barWidth/2;
+        const y = localTank.y - localTank.displayHeight/2 - 10;
+        localHealthBar.fillStyle(0x000000);
+        localHealthBar.fillRect(x, y, barWidth, barHeight);
+        let healthPercent = Phaser.Math.Clamp(localTank.health / localTank.maxHealth, 0, 1);
+        localHealthBar.fillStyle(0x00ff00);
+        localHealthBar.fillRect(x+1, y+1, (barWidth-2)*healthPercent, barHeight-2);
         localUsernameText.setPosition(localTank.x, localTank.y - localTank.displayHeight - 15);
-        for (const pid in otherPlayers) {
-          const remoteObj = otherPlayers[pid];
-          drawHealthBar(remoteObj.sprite, remoteObj.healthBar, remoteObj.sprite.health, remoteObj.sprite.maxHealth);
-          remoteObj.usernameText.setPosition(remoteObj.sprite.x, remoteObj.sprite.y - remoteObj.sprite.displayHeight - 15);
-        }
         
-        // Remove offline remote players (if no ping for 10 seconds)
+        // Remove remote players that appear offline (no ping for 10 seconds)
         for (const pid in otherPlayers) {
           if (Date.now() - otherPlayers[pid].lastPing > 10000) {
             otherPlayers[pid].sprite.destroy();
             otherPlayers[pid].healthBar.destroy();
             otherPlayers[pid].usernameText.destroy();
-            if(otherPlayers[pid].shield) {
-              otherPlayers[pid].shield.destroy();
-            }
+            if(otherPlayers[pid].shield) { otherPlayers[pid].shield.destroy(); }
             delete otherPlayers[pid];
           }
         }
       }
       
-      // Remove player data from Firebase when the window is closed or refreshed
       window.addEventListener('beforeunload', () => {
         set(ref(db, "players/" + playerId), null);
       });
+      
+      function doGameOver() {
+        gameOverTriggered = true;
+        localTank.setTint(0xff0000);
+        localTank.setVelocity(0);
+        document.getElementById("gameover-container").style.display = "block";
+        set(ref(db, "players/" + playerId), null);
+      }
     }
   </script>
 </body>
 </html>
-
