@@ -24,9 +24,9 @@
     // Import Firebase modules from the CDN
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
     import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-analytics.js";
-    import { getDatabase, ref, onValue, set, update } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-database.js";
+    import { getDatabase, ref, onValue, set, update, onDisconnect } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-database.js";
 
-    // Firebase configuration (replace with your own if needed)
+    // Firebase configuration
     const firebaseConfig = {
       apiKey: "AIzaSyAuWY5GDgH2_-iiNCluN89cjsip19qIpGM",
       authDomain: "fortnite-64ecb.firebaseapp.com",
@@ -98,6 +98,8 @@
         direction: player.direction,
         trail: player.trail
       });
+      // Remove the player's record when they disconnect
+      onDisconnect(playerRef).remove();
     }
     joinGame();
 
