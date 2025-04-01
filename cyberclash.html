@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cyber Clash Arena</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin: 0;
+      padding: 0;
+      background: #f0f0f0;
+    }
+    h1 {
+      margin-top: 20px;
+    }
+    #gameCanvas {
+      border: 1px solid #000;
+      background: #fff;
+      display: block;
+      margin: 20px auto;
+    }
+    #chatContainer {
+      width: 80%;
+      max-width: 600px;
+      margin: 20px auto;
+      border: 1px solid #ccc;
+      padding: 10px;
+      background: #fff;
+    }
+    #chatMessages {
+      height: 150px;
+      overflow-y: scroll;
+      border: 1px solid #ccc;
+      padding: 5px;
+      background: #fafafa;
+      text-align: left;
+    }
+    #chatInput {
+      width: 70%;
+      padding: 5px;
+      margin-top: 10px;
+    }
+    #sendChat {
+      padding: 5px 10px;
+      margin-top: 10px;
+    }
+    #loginButton {
+      margin: 20px;
+      padding: 10px 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Cyber Clash Arena</h1>
+  <button id="loginButton">Login with Google</button>
+  <canvas id="gameCanvas" width="600" height="400"></canvas>
+  
+  <div id="chatContainer">
+    <h2>Lobby Chat</h2>
+    <div id="chatMessages"></div>
+    <input type="text" id="chatInput" placeholder="Type your message...">
+    <button id="sendChat">Send</button>
+  </div>
+  
+  <!-- Firebase & Game Logic -->
+  <script type="module">
+    // Import Firebase modules from the CDN
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
+    import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-analytics.js";
+    import { getAuth, signInWithPopup, GoogleAuthProvider } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
+    import { getDatabase, ref, onValue, push, set, update } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-database.js";
+    
+    // Firebase configuration
+    const firebaseConfig = {
+      apiKey: "AIzaSyAuWY5GDgH2_-iiNCluN89cjsip19qIpGM",
+      authDomain: "fortnite-64ecb.firebaseapp.com",
+      databaseURL: "https://fortnite-64ecb-default-rtdb.firebaseio.com",
+      projectId: "fortnite-64ecb",
+      storageBucket: "fortnite-64ecb.firebasestorage.app",
+      messagingSenderId: "643049506369",
+      appId: "1:643049506369:web:15e6e0bbf6bd0462bca8c0",
+      measurementId: "G-KGWJWD3Z3C"
+    };
+    
+    // Initialize Firebase
+    const app = initializeApp(firebaseConfig);
+    const analytics = getAnalytics(app);
+    const auth = getAuth(app);
+    const db = getDatabase(app);
+    
+    // DOM Elements
+    const loginButton = document.getElementById('loginButton');
+    const gameCanvas = document.getElementById('gameCanvas');
+    const ctx = gameCanvas.getContext('2d');
+    const chatMessages = document.getElementById('chatMessages');
+    const chatInput = document.getElementById('chatInput');
+    const sendChat = document.getElementById('sendChat');
+    
+    let currentUser = null;
+    let playerId = null;
+    let lobbyId = "lobby1"; // Using a fixed lobby for this example
+    let playerPosition = { x: 300, y: 200 };
+    
+    // Login function using Google Sign-In
+    loginButton.addEventListener('click', () => {
+      const provider = new GoogleAuthProvider();
+      signInWithPopup(auth, provider)
+        .then((result) => {
+          currentUser = result.user;
+          playerId = currentUser.uid;
+          loginButton.style.display = 'none';
+          joinLobby();
+        })
+        .catch((error) => {
+          console.error("Authentication error:", error);
+        });
+    });
+    
+    // Join a lobby and set initial player state in Firebase
+    function joinLobby() {
+      const playerRef = ref(db, "lobbies/" + lobbyId + "/players/" + playerId);
+      set(playerRef, {
+        x: playerPosition.x,
+        y: playerPosition.y,
+        name: currentUser.displayName || "Anonymous"
+      });
+      
+      // Listen for lobby changes to update the game state and chat
+      const lobbyRef = ref(db, "lobbies/" + lobbyId);
+      onValue(lobbyRef, (snapshot) => {
+        const lobbyData = snapshot.val();
+        renderGame(lobbyData);
+        if(lobbyData && lobbyData.chat) {
+          renderChat(lobbyData.chat);
+        }
+      });
+    }
+    
+    // Render game state on the canvas
+    function renderGame(lobbyData) {
+      ctx.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
+      if(lobbyData && lobbyData.players) {
+        for(const id in lobbyData.players) {
+          const player = lobbyData.players[id];
+          // Draw player as a circle
+          ctx.beginPath();
+          ctx.arc(player.x, player.y, 10, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.closePath();
+          
+          // Draw the player's name above the circle
+          ctx.font = "12px Arial";
+          ctx.fillText(player.name, player.x - 20, player.y - 15);
+        }
+      }
+    }
+    
+    // Render chat messages from the lobby
+    function renderChat(chatData) {
+      chatMessages.innerHTML = "";
+      for(const msgId in chatData) {
+        const msg = chatData[msgId];
+        const msgElem = document.createElement('div');
+        msgElem.textContent = msg.name + ": " + msg.message;
+        chatMessages.appendChild(msgElem);
+      }
+      // Scroll to the bottom
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+    
+    // Send chat message function
+    sendChat.addEventListener('click', sendMessage);
+    chatInput.addEventListener('keypress', (e) => {
+      if(e.key === 'Enter') {
+        sendMessage();
+      }
+    });
+    
+    function sendMessage() {
+      const messageText = chatInput.value.trim();
+      if(messageText && currentUser) {
+        const chatRef = ref(db, "lobbies/" + lobbyId + "/chat");
+        const newMsgRef = push(chatRef);
+        set(newMsgRef, {
+          name: currentUser.displayName || "Anonymous",
+          message: messageText,
+          timestamp: Date.now()
+        });
+        chatInput.value = "";
+      }
+    }
+    
+    // Simulate player movement by randomly updating the player's position every 2 seconds
+    setInterval(() => {
+      if(currentUser) {
+        playerPosition.x += (Math.random() - 0.5) * 20;
+        playerPosition.y += (Math.random() - 0.5) * 20;
+        // Ensure the player stays within the canvas boundaries
+        playerPosition.x = Math.max(10, Math.min(gameCanvas.width - 10, playerPosition.x));
+        playerPosition.y = Math.max(10, Math.min(gameCanvas.height - 10, playerPosition.y));
+        const playerRef = ref(db, "lobbies/" + lobbyId + "/players/" + playerId);
+        update(playerRef, {
+          x: playerPosition.x,
+          y: playerPosition.y
+        });
+      }
+    }, 2000);
+    
+  </script>
+</body>
+</html>
