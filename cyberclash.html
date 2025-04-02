@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Crossy Road Multiplayer - Enhanced</title>
+  <title>Crossy Road Multiplayer - Gun Feature for Pranav</title>
   <style>
     html, body {
       margin: 0;
@@ -57,7 +57,7 @@
 <body>
   <!-- Login Screen -->
   <div id="loginContainer">
-    <h1>Crossy Road Multiplayer Enhanced</h1>
+    <h1>Crossy Road Multiplayer - Enhanced</h1>
     <input type="text" id="playerName" placeholder="Enter your name" />
     <p>Draw your avatar (a square face):</p>
     <canvas id="avatarCanvas" width="100" height="100"></canvas>
@@ -76,7 +76,7 @@
     // ----- Firebase Setup -----
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
     import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-analytics.js";
-    import { getDatabase, ref, onValue, set, update, onDisconnect } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-database.js";
+    import { getDatabase, ref, onValue, set, update, onDisconnect, push, remove } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-database.js";
     
     const firebaseConfig = {
       apiKey: "AIzaSyAuWY5GDgH2_-iiNCluN89cjsip19qIpGM",
@@ -94,14 +94,13 @@
     const db = getDatabase(app);
     
     // ----- Global Constants & Variables -----
-    const blockSize = 50;   // Each move is 50px (one block)
+    const blockSize = 50;   // Each move is one block (50px)
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
     let canvasWidth = window.innerWidth;
     let canvasHeight = window.innerHeight;
     canvas.width = canvasWidth;
     canvas.height = canvasHeight;
-    
     window.addEventListener("resize", () => {
       canvasWidth = window.innerWidth;
       canvasHeight = window.innerHeight;
@@ -112,7 +111,7 @@
     // Score display element
     const scoreDisplay = document.getElementById("scoreDisplay");
     
-    // Shared seed for world generation (so every player sees the same world)
+    // Shared seed for world generation (all players see the same world)
     let seed;
     const seedRef = ref(db, "lobbies/crossyLobby/seed");
     onValue(seedRef, snapshot => {
@@ -124,7 +123,7 @@
       }
     });
     
-    // Simple seeded random function
+    // Simple seeded random functions
     function seededRandom(s) {
       let x = Math.sin(s) * 10000;
       return x - Math.floor(x);
@@ -165,16 +164,19 @@
     });
     clearAvatarBtn.click();
     
-    // Player object, to be set on login
+    // ----- Player Object & Initialization -----
     let player = {
       name: "",
       avatar: "",  // Data URL for avatar image
-      gridX: 0,    // grid coordinates (in blocks)
+      gridX: 0,    // Grid coordinates (in blocks)
       gridY: 0,
       alive: true,
       score: 0
     };
     let playerId = '_' + Math.random().toString(36).substr(2, 9);
+    
+    // If the player's name is "pranav", give them gun properties.
+    // (These will be set after login if applicable.)
     
     // ----- Multiplayer: Sync Other Players -----
     let otherPlayers = {};
@@ -186,9 +188,15 @@
       }
     });
     
+    // ----- Gun Bullets (for pranav) -----
+    let gunBullets = {};
+    const gunBulletsRef = ref(db, "lobbies/crossyLobby/gunBullets");
+    onValue(gunBulletsRef, snapshot => {
+      gunBullets = snapshot.val() || {};
+    });
+    
     // ----- World Generation Functions -----
     // Lane types: "train", "road", "land"
-    // For rows at or below the starting row, always "land" (safe area)
     function getLaneType(row) {
       const startingRow = player.startRow;
       if (row >= startingRow) return "land";
@@ -198,8 +206,7 @@
       else return "land";
     }
     
-    // For "land" lanes, generate trees that block movement.
-    // Each column in a lane has a 20% chance to have a tree.
+    // For "land" lanes, generate trees (impassable obstacles)
     function getTreesForLane(row) {
       let trees = [];
       let numCols = Math.floor(canvasWidth / blockSize);
@@ -211,14 +218,18 @@
       return trees;
     }
     
-    // Generate cars for road lanes.
+    // Generate cars for road lanes with increased and random speeds.
     function getCarsForLane(row) {
       if (getLaneType(row) !== "road") return [];
       let cars = [];
       let numCars = Math.floor(randomWithSeed(row * 2) * 3) + 2; // 2 to 4 cars
       let direction = (row % 2 === 0) ? "right" : "left";
+      // Original base speed between 2 and 5
       let baseSpeed = 2 + randomWithSeed(row * 3) * 3;
       for (let i = 0; i < numCars; i++) {
+        // Apply a multiplier between 3 and 3.5
+        let speedMultiplier = 3 + randomWithSeed(row * 10 + i) * 0.5;
+        let finalSpeed = baseSpeed * speedMultiplier;
         let spacing = canvasWidth / numCars;
         let x = spacing * i + randomWithSeed(row * 10 + i) * spacing;
         let carWidth = 60;
@@ -228,57 +239,107 @@
           y: row * blockSize + (blockSize - carHeight) / 2,
           width: carWidth,
           height: carHeight,
-          speed: baseSpeed * (direction === "left" ? -1 : 1)
+          speed: finalSpeed * (direction === "left" ? -1 : 1)
         });
       }
       return cars;
     }
     
-    // Train events now have unique cycle offsets per lane so they aren’t synchronized.
+    // Train events now have a very short active phase (200ms).
     const trainCycle = 10000; // 10-second cycle
     function getTrainEvent(row) {
       let offset = randomWithSeed(row + 1000) * trainCycle;
       let t = (Date.now() + offset) % trainCycle;
       if (t < 2000) return { state: "warning" };
-      else if (t < 5000) {
-        let timeFactor = (t - 2000) / 3000; // 0 to 1
+      else if (t < 2200) {
+        // Active phase lasts 200ms (0.2 seconds)
+        let timeFactor = (t - 2000) / 200; // 0 to 1 over 200ms
         let x = ((timeFactor * (canvasWidth + 200)) - 200);
         return { state: "active", x: x, width: 200, height: blockSize * 0.8 };
       } else return { state: "cooldown" };
     }
     
-    // ----- Input: Discrete Movement with Collision Check for Trees -----
+    // ----- Gun Functionality for "pranav" -----
+    // If the player's name is "pranav" (case-insensitive), they get a gun.
+    // The gun is hidden initially (gunActive false). Pressing "1" toggles it.
+    // When active, the gun points toward the mouse pointer.
+    // Left-click fires a bullet that moves quickly and kills any player hit.
+    const bulletSpeed = 1000; // pixels per second
+    if (playerNameInput.value.toLowerCase() === "pranav") {
+      // We'll set gun properties after login.
+    }
+    
+    // Listen for mouse movement and update gun angle (only if gun is active and player is pranav)
+    document.addEventListener("mousemove", (e) => {
+      if (player.gunActive && player.name.toLowerCase() === "pranav") {
+        // Player's world center
+        let pCenterX = player.gridX * blockSize + blockSize / 2;
+        let pCenterY = player.gridY * blockSize + blockSize / 2;
+        // Convert mouse coordinates to world coordinates (add cameraOffsetY)
+        let worldMouseX = e.clientX;
+        let worldMouseY = e.clientY + cameraOffsetY;
+        let dx = worldMouseX - pCenterX;
+        let dy = worldMouseY - pCenterY;
+        let angle = Math.atan2(dy, dx);
+        player.gunAngle = angle;
+        // Update player's gun state in Firebase.
+        update(ref(db, "lobbies/crossyLobby/players/" + playerId), { gunActive: player.gunActive, gunAngle: player.gunAngle });
+      }
+    });
+    
+    // Listen for mouse clicks to fire bullet (if gun active)
+    document.addEventListener("mousedown", (e) => {
+      if (e.button === 0 && player.gunActive && player.name.toLowerCase() === "pranav") {
+        // Fire a bullet from player's center in direction of gunAngle.
+        let pCenterX = player.gridX * blockSize + blockSize / 2;
+        let pCenterY = player.gridY * blockSize + blockSize / 2;
+        let vx = Math.cos(player.gunAngle) * bulletSpeed;
+        let vy = Math.sin(player.gunAngle) * bulletSpeed;
+        let bullet = {
+          shooter: playerId,
+          x: pCenterX,
+          y: pCenterY,
+          vx: vx,
+          vy: vy,
+          created: Date.now()
+        };
+        // Push the bullet to Firebase.
+        push(ref(db, "lobbies/crossyLobby/gunBullets"), bullet);
+      }
+    });
+    
+    // Listen for key "1" to toggle gun visibility (for pranav only)
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "1" && player.name.toLowerCase() === "pranav") {
+        player.gunActive = !player.gunActive;
+        update(ref(db, "lobbies/crossyLobby/players/" + playerId), { gunActive: player.gunActive, gunAngle: player.gunAngle });
+      }
+    });
+    
+    // ----- Input: Discrete Movement with Tree Collision -----
     let moveLock = { ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
     window.addEventListener("keydown", (e) => {
       if (!moveLock[e.key] && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
-        // Compute candidate new position.
         let newX = player.gridX;
         let newY = player.gridY;
         if (e.key === "ArrowUp") newY -= 1;
         if (e.key === "ArrowDown") newY += 1;
         if (e.key === "ArrowLeft") newX -= 1;
         if (e.key === "ArrowRight") newX += 1;
-        
-        // Restrict horizontal movement within available columns.
         let numCols = Math.floor(canvasWidth / blockSize);
         if (newX < 0 || newX >= numCols) {
           moveLock[e.key] = true;
           return;
         }
-        
-        // In land lanes, check if the target cell has a tree.
         if (getLaneType(newY) === "land") {
           let trees = getTreesForLane(newY);
           if (trees.includes(newX)) {
             moveLock[e.key] = true;
-            return; // Block move into a tree.
+            return;
           }
         }
-        
-        // Valid move: update player's grid position.
         player.gridX = newX;
         player.gridY = newY;
-        // Update score based on how far upward the player has gone.
         let newScore = player.startRow - player.gridY;
         if (newScore > player.score) {
           player.score = newScore;
@@ -292,44 +353,87 @@
     });
     
     // ----- Player Death & Respawn -----
-    function respawnPlayer() {
-      player.alive = false;
-      update(ref(db, "lobbies/crossyLobby/players/" + playerId), player);
-      setTimeout(() => {
-        let numCols = Math.floor(canvasWidth / blockSize);
-        player.gridX = Math.floor(numCols / 2);
-        player.gridY = player.startRow;
-        player.alive = true;
+    function respawnPlayer(targetId) {
+      // If targetId is local player, run local respawn logic.
+      if (targetId === playerId) {
+        player.alive = false;
         update(ref(db, "lobbies/crossyLobby/players/" + playerId), player);
-      }, 1000);
+        setTimeout(() => {
+          let numCols = Math.floor(canvasWidth / blockSize);
+          player.gridX = Math.floor(numCols / 2);
+          player.gridY = player.startRow;
+          player.alive = true;
+          update(ref(db, "lobbies/crossyLobby/players/" + playerId), player);
+        }, 1000);
+      } else {
+        // For remote players, mark them as dead in Firebase.
+        update(ref(db, "lobbies/crossyLobby/players/" + targetId), { alive: false });
+      }
+    }
+    
+    // ----- Update Gun Bullets (Movement & Collision) -----
+    let lastFrameTime = Date.now();
+    
+    function updateGunBullets(dt) {
+      for (let bulletKey in gunBullets) {
+        let bullet = gunBullets[bulletKey];
+        // Update bullet position using dt (in seconds)
+        bullet.x += bullet.vx * (dt / 1000);
+        bullet.y += bullet.vy * (dt / 1000);
+        // Check if bullet is off the visible game world (with some margin)
+        if (bullet.x < -50 || bullet.x > canvasWidth + 50 ||
+            bullet.y < -50 || bullet.y > (canvasHeight + cameraOffsetY + 50)) {
+          remove(ref(db, "lobbies/crossyLobby/gunBullets/" + bulletKey));
+          continue;
+        }
+        // Collision detection: check against all players except the shooter.
+        for (let id in otherPlayers) {
+          if (id === bullet.shooter) continue;
+          let op = otherPlayers[id];
+          // Compute player's absolute position.
+          let opX = op.gridX * blockSize;
+          let opY = op.gridY * blockSize;
+          if (bullet.x >= opX && bullet.x <= opX + blockSize &&
+              bullet.y >= opY && bullet.y <= opY + blockSize &&
+              op.alive) {
+            // Kill the hit player.
+            respawnPlayer(id);
+            remove(ref(db, "lobbies/crossyLobby/gunBullets/" + bulletKey));
+            break;
+          }
+        }
+        // Also check collision with local player if shooter isn't local.
+        if (bullet.shooter !== playerId && player.alive) {
+          let pX = player.gridX * blockSize;
+          let pY = player.gridY * blockSize;
+          if (bullet.x >= pX && bullet.x <= pX + blockSize &&
+              bullet.y >= pY && bullet.y <= pY + blockSize) {
+            respawnPlayer(playerId);
+            remove(ref(db, "lobbies/crossyLobby/gunBullets/" + bulletKey));
+          }
+        }
+        // Update bullet in Firebase.
+        update(ref(db, "lobbies/crossyLobby/gunBullets/" + bulletKey), bullet);
+      }
     }
     
     // ----- Rendering & Game Loop -----
     let cameraOffsetY = 0;
     function renderGame() {
       ctx.clearRect(0, 0, canvasWidth, canvasHeight);
-      
-      // Compute player's pixel position.
       let playerPixelX = player.gridX * blockSize;
       let playerPixelY = player.gridY * blockSize;
-      
-      // Update camera so the player remains roughly 70% from the bottom.
       let targetOffsetY = playerPixelY - canvasHeight * 0.7;
       cameraOffsetY += (targetOffsetY - cameraOffsetY) * 0.1;
-      
-      // Determine which rows are visible.
       let startRow = Math.floor(cameraOffsetY / blockSize);
       let numRows = Math.ceil(canvasHeight / blockSize) + 1;
       
       for (let row = startRow; row < startRow + numRows; row++) {
         let laneType = getLaneType(row);
         let yPos = row * blockSize - cameraOffsetY;
-        
-        // Draw lane backgrounds with improved graphics.
         if (laneType === "road") {
           ctx.fillStyle = "#444";
           ctx.fillRect(0, yPos, canvasWidth, blockSize);
-          // Road markings
           ctx.strokeStyle = "#fff";
           ctx.lineWidth = 2;
           ctx.setLineDash([10, 10]);
@@ -339,27 +443,22 @@
           ctx.stroke();
           ctx.setLineDash([]);
         } else if (laneType === "land") {
-          // Use a green gradient for land.
           let grd = ctx.createLinearGradient(0, yPos, 0, yPos + blockSize);
           grd.addColorStop(0, "#76c893");
           grd.addColorStop(1, "#4caf50");
           ctx.fillStyle = grd;
           ctx.fillRect(0, yPos, canvasWidth, blockSize);
-          // Draw trees.
           let trees = getTreesForLane(row);
           for (let col of trees) {
             let treeX = col * blockSize;
-            // Draw trunk.
             ctx.fillStyle = "#8B4513";
             ctx.fillRect(treeX + blockSize * 0.4, yPos + blockSize * 0.5, blockSize * 0.2, blockSize * 0.5);
-            // Draw foliage.
             ctx.fillStyle = "#228B22";
             ctx.beginPath();
             ctx.arc(treeX + blockSize * 0.5, yPos + blockSize * 0.4, blockSize * 0.3, 0, Math.PI * 2);
             ctx.fill();
           }
         } else if (laneType === "train") {
-          // Concrete look for train lanes.
           ctx.fillStyle = "#666";
           ctx.fillRect(0, yPos, canvasWidth, blockSize);
           let train = getTrainEvent(row);
@@ -372,7 +471,6 @@
             let x = train.x;
             ctx.fillStyle = "#FF9800";
             ctx.fillRect(x, yPos + (blockSize - train.height)/2, train.width, train.height);
-            // Check collision with train.
             if (player.alive && player.gridY === row) {
               let playerRect = { x: player.gridX * blockSize, y: yPos, width: blockSize, height: blockSize };
               let trainRect = { x: x, y: yPos + (blockSize - train.height)/2, width: train.width, height: train.height };
@@ -380,25 +478,22 @@
                   playerRect.x + playerRect.width > trainRect.x &&
                   playerRect.y < trainRect.y + trainRect.height &&
                   playerRect.y + playerRect.height > trainRect.y) {
-                respawnPlayer();
+                respawnPlayer(playerId);
               }
             }
           }
         }
         
-        // In road lanes, draw animated cars.
         if (laneType === "road") {
           let cars = getCarsForLane(row);
           for (let car of cars) {
             let t = Date.now() / 50;
             let pos = car.x + car.speed * t;
             pos = ((pos % (canvasWidth + car.width)) + (canvasWidth + car.width)) % (canvasWidth + car.width) - car.width;
-            // Draw car with window details.
             ctx.fillStyle = "#e53935";
             ctx.fillRect(pos, yPos + (blockSize - car.height)/2, car.width, car.height);
             ctx.fillStyle = "#fff";
             ctx.fillRect(pos + 10, yPos + (blockSize - car.height)/2 + 5, car.width - 20, car.height/2);
-            // Check collision with local player.
             if (player.alive && player.gridY === row) {
               let playerRect = { x: player.gridX * blockSize, y: yPos, width: blockSize, height: blockSize };
               let carRect = { x: pos, y: yPos + (blockSize - car.height)/2, width: car.width, height: car.height };
@@ -406,11 +501,20 @@
                   playerRect.x + playerRect.width > carRect.x &&
                   playerRect.y < carRect.y + carRect.height &&
                   playerRect.y + playerRect.height > carRect.y) {
-                respawnPlayer();
+                respawnPlayer(playerId);
               }
             }
           }
         }
+      }
+      
+      // Draw gun bullets.
+      for (let bulletKey in gunBullets) {
+        let bullet = gunBullets[bulletKey];
+        ctx.fillStyle = "#ff0";
+        ctx.beginPath();
+        ctx.arc(bullet.x - 0, bullet.y - cameraOffsetY, 5, 0, Math.PI * 2);
+        ctx.fill();
       }
       
       // Draw other players.
@@ -430,9 +534,23 @@
         ctx.fillStyle = "#000";
         ctx.font = "12px sans-serif";
         ctx.fillText(op.name || "Anon", opX, opY + 12);
+        // If the player has a gun active, draw the gun.
+        if (op.gunActive && op.gunAngle !== undefined) {
+          let centerX = opX + blockSize/2;
+          let centerY = opY + blockSize/2;
+          let gunLength = 30;
+          let endX = centerX + Math.cos(op.gunAngle) * gunLength;
+          let endY = centerY + Math.sin(op.gunAngle) * gunLength;
+          ctx.strokeStyle = "#000";
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.moveTo(centerX, centerY);
+          ctx.lineTo(endX, endY);
+          ctx.stroke();
+        }
       }
       
-      // Draw local player on top.
+      // Draw local player.
       let localX = player.gridX * blockSize;
       let localY = player.gridY * blockSize - cameraOffsetY;
       if (player.avatar) {
@@ -446,12 +564,28 @@
       ctx.fillStyle = "#000";
       ctx.font = "12px sans-serif";
       ctx.fillText(player.name, localX, localY + 12);
+      if (player.gunActive && player.gunAngle !== undefined) {
+        let centerX = localX + blockSize/2;
+        let centerY = localY + blockSize/2;
+        let gunLength = 30;
+        let endX = centerX + Math.cos(player.gunAngle) * gunLength;
+        let endY = centerY + Math.sin(player.gunAngle) * gunLength;
+        ctx.strokeStyle = "#000";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+      }
       
-      // Update score display.
       scoreDisplay.textContent = "Score: " + player.score;
     }
     
     function gameLoop() {
+      let now = Date.now();
+      let dt = now - lastFrameTime;
+      lastFrameTime = now;
+      updateGunBullets(dt);
       renderGame();
       requestAnimationFrame(gameLoop);
     }
@@ -464,23 +598,26 @@
         return;
       }
       player.name = name;
+      // If name is "pranav", add gun properties.
+      if (player.name.toLowerCase() === "pranav") {
+        player.gunActive = false;
+        player.gunAngle = 0;
+      }
       player.avatar = avatarCanvas.toDataURL();
-      // Set starting grid position (safe area at the bottom).
       player.startRow = Math.floor(canvasHeight / blockSize) - 1;
       let numCols = Math.floor(canvasWidth / blockSize);
       player.gridX = Math.floor(numCols / 2);
       player.gridY = player.startRow;
       player.score = 0;
       
-      // Write player data to Firebase and ensure removal on disconnect.
       const playerRef = ref(db, "lobbies/crossyLobby/players/" + playerId);
       set(playerRef, player);
       onDisconnect(playerRef).remove();
       
-      // Hide login UI and show game canvas.
       loginContainer.style.display = "none";
       canvas.style.display = "block";
       
+      lastFrameTime = Date.now();
       gameLoop();
     });
   </script>
