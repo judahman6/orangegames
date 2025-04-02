@@ -3,30 +3,81 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Tron Multiplayer Game</title>
+  <title>Crossy Road Multiplayer - Enhanced</title>
   <style>
     html, body {
       margin: 0;
       padding: 0;
       overflow: hidden;
-      background: #000;
+      background: #333;
+      font-family: sans-serif;
     }
-    canvas {
-      display: block;
-      background: #111;
+    /* Login UI styling */
+    #loginContainer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: #222;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+    #loginContainer input, #loginContainer button {
+      font-size: 18px;
+      padding: 8px;
+      margin: 5px;
+    }
+    #avatarCanvas {
+      border: 1px solid #fff;
+      background: #fff;
+      cursor: crosshair;
+    }
+    /* Hide game canvas during login */
+    #gameCanvas {
+      display: none;
+    }
+    /* Score display */
+    #scoreDisplay {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: #fff;
+      font-size: 24px;
+      font-weight: bold;
+      text-shadow: 2px 2px 4px #000;
+      z-index: 5;
     }
   </style>
 </head>
 <body>
+  <!-- Login Screen -->
+  <div id="loginContainer">
+    <h1>Crossy Road Multiplayer Enhanced</h1>
+    <input type="text" id="playerName" placeholder="Enter your name" />
+    <p>Draw your avatar (a square face):</p>
+    <canvas id="avatarCanvas" width="100" height="100"></canvas>
+    <div>
+      <button id="clearAvatar">Clear Drawing</button>
+      <button id="startGame">Go</button>
+    </div>
+  </div>
+  
+  <!-- Score Display -->
+  <div id="scoreDisplay">Score: 0</div>
+  <!-- Game Canvas -->
   <canvas id="gameCanvas"></canvas>
-
+  
   <script type="module">
-    // Import Firebase modules from the CDN
+    // ----- Firebase Setup -----
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
     import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-analytics.js";
     import { getDatabase, ref, onValue, set, update, onDisconnect } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-database.js";
-
-    // Firebase configuration
+    
     const firebaseConfig = {
       apiKey: "AIzaSyAuWY5GDgH2_-iiNCluN89cjsip19qIpGM",
       authDomain: "fortnite-64ecb.firebaseapp.com",
@@ -37,129 +88,401 @@
       appId: "1:643049506369:web:15e6e0bbf6bd0462bca8c0",
       measurementId: "G-KGWJWD3Z3C"
     };
-
-    // Initialize Firebase
+    
     const app = initializeApp(firebaseConfig);
     const analytics = getAnalytics(app);
     const db = getDatabase(app);
-
-    // Full screen canvas setup
-    const canvas = document.getElementById('gameCanvas');
-    const ctx = canvas.getContext('2d');
-
-    function adjustCanvasSize() {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-    }
-    window.addEventListener('resize', adjustCanvasSize);
-    adjustCanvasSize();
-
-    // Generate a random player ID
-    let playerId = '_' + Math.random().toString(36).substr(2, 9);
-
-    // Initialize the player's Tron state
-    let player = {
-      x: canvas.width / 2,
-      y: canvas.height / 2,
-      direction: 'right',
-      trail: []
-    };
-
-    // Define movement directions (5 pixels per update)
-    const directions = {
-      up: { dx: 0, dy: -5 },
-      down: { dx: 0, dy: 5 },
-      left: { dx: -5, dy: 0 },
-      right: { dx: 5, dy: 0 }
-    };
-
-    // Listen for arrow key presses (preventing 180° turns)
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'ArrowUp' && player.direction !== 'down') {
-        player.direction = 'up';
-      } else if (e.key === 'ArrowDown' && player.direction !== 'up') {
-        player.direction = 'down';
-      } else if (e.key === 'ArrowLeft' && player.direction !== 'right') {
-        player.direction = 'left';
-      } else if (e.key === 'ArrowRight' && player.direction !== 'left') {
-        player.direction = 'right';
+    
+    // ----- Global Constants & Variables -----
+    const blockSize = 50;   // Each move is 50px (one block)
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    let canvasWidth = window.innerWidth;
+    let canvasHeight = window.innerHeight;
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+    
+    window.addEventListener("resize", () => {
+      canvasWidth = window.innerWidth;
+      canvasHeight = window.innerHeight;
+      canvas.width = canvasWidth;
+      canvas.height = canvasHeight;
+    });
+    
+    // Score display element
+    const scoreDisplay = document.getElementById("scoreDisplay");
+    
+    // Shared seed for world generation (so every player sees the same world)
+    let seed;
+    const seedRef = ref(db, "lobbies/crossyLobby/seed");
+    onValue(seedRef, snapshot => {
+      if (snapshot.exists()) {
+        seed = snapshot.val();
+      } else {
+        seed = Math.floor(Math.random() * 1000000);
+        set(seedRef, seed);
       }
     });
-
-    // Use a fixed lobby ID for all players
-    const lobbyId = 'tronLobby';
-
-    // Join the game immediately by setting the player's initial state in Firebase
-    function joinGame() {
-      const playerRef = ref(db, "lobbies/" + lobbyId + "/players/" + playerId);
-      set(playerRef, {
-        x: player.x,
-        y: player.y,
-        direction: player.direction,
-        trail: player.trail
-      });
-      // Remove the player's record when they disconnect
-      onDisconnect(playerRef).remove();
+    
+    // Simple seeded random function
+    function seededRandom(s) {
+      let x = Math.sin(s) * 10000;
+      return x - Math.floor(x);
     }
-    joinGame();
-
-    // Update the player's state: move based on the current direction and update Firebase
-    function updatePlayerState() {
-      player.x += directions[player.direction].dx;
-      player.y += directions[player.direction].dy;
-
-      // Add the new position to the player's trail
-      player.trail.push({ x: player.x, y: player.y });
-
-      // Update the player's data in Firebase
-      const playerRef = ref(db, "lobbies/" + lobbyId + "/players/" + playerId);
-      update(playerRef, {
-        x: player.x,
-        y: player.y,
-        direction: player.direction,
-        trail: player.trail
-      });
+    function randomWithSeed(offset) {
+      return seededRandom(seed + offset);
     }
-
-    // Render all players' trails and positions on the canvas
-    function renderGame(gameData) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      if (gameData && gameData.players) {
-        for (const id in gameData.players) {
-          const p = gameData.players[id];
-          // Draw the trail as a continuous line
-          if (p.trail && p.trail.length > 0) {
-            ctx.beginPath();
-            ctx.strokeStyle = (id === playerId) ? "#0f0" : "#f00";
-            ctx.lineWidth = 2;
-            ctx.moveTo(p.trail[0].x, p.trail[0].y);
-            for (let i = 1; i < p.trail.length; i++) {
-              ctx.lineTo(p.trail[i].x, p.trail[i].y);
-            }
-            ctx.stroke();
-            ctx.closePath();
-          }
-          // Draw the current position as a circle
-          ctx.beginPath();
-          ctx.fillStyle = (id === playerId) ? "#0f0" : "#f00";
-          ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.closePath();
+    
+    // ----- Login & Avatar Drawing -----
+    const loginContainer = document.getElementById("loginContainer");
+    const playerNameInput = document.getElementById("playerName");
+    const avatarCanvas = document.getElementById("avatarCanvas");
+    const avatarCtx = avatarCanvas.getContext("2d");
+    const clearAvatarBtn = document.getElementById("clearAvatar");
+    const startGameBtn = document.getElementById("startGame");
+    
+    let drawing = false;
+    avatarCanvas.addEventListener("mousedown", (e) => {
+      drawing = true;
+      avatarCtx.lineWidth = 4;
+      avatarCtx.lineCap = "round";
+      avatarCtx.strokeStyle = "#000";
+      avatarCtx.beginPath();
+      avatarCtx.moveTo(e.offsetX, e.offsetY);
+    });
+    avatarCanvas.addEventListener("mousemove", (e) => {
+      if (drawing) {
+        avatarCtx.lineTo(e.offsetX, e.offsetY);
+        avatarCtx.stroke();
+      }
+    });
+    avatarCanvas.addEventListener("mouseup", () => drawing = false);
+    avatarCanvas.addEventListener("mouseleave", () => drawing = false);
+    clearAvatarBtn.addEventListener("click", () => {
+      avatarCtx.clearRect(0, 0, avatarCanvas.width, avatarCanvas.height);
+      avatarCtx.fillStyle = "#fff";
+      avatarCtx.fillRect(0, 0, avatarCanvas.width, avatarCanvas.height);
+    });
+    clearAvatarBtn.click();
+    
+    // Player object, to be set on login
+    let player = {
+      name: "",
+      avatar: "",  // Data URL for avatar image
+      gridX: 0,    // grid coordinates (in blocks)
+      gridY: 0,
+      alive: true,
+      score: 0
+    };
+    let playerId = '_' + Math.random().toString(36).substr(2, 9);
+    
+    // ----- Multiplayer: Sync Other Players -----
+    let otherPlayers = {};
+    const lobbyPlayersRef = ref(db, "lobbies/crossyLobby/players");
+    onValue(lobbyPlayersRef, snapshot => {
+      const data = snapshot.val();
+      if (data) {
+        otherPlayers = data;
+      }
+    });
+    
+    // ----- World Generation Functions -----
+    // Lane types: "train", "road", "land"
+    // For rows at or below the starting row, always "land" (safe area)
+    function getLaneType(row) {
+      const startingRow = player.startRow;
+      if (row >= startingRow) return "land";
+      let r = randomWithSeed(row);
+      if (r < 0.1) return "train";
+      else if (r < 0.5) return "road";
+      else return "land";
+    }
+    
+    // For "land" lanes, generate trees that block movement.
+    // Each column in a lane has a 20% chance to have a tree.
+    function getTreesForLane(row) {
+      let trees = [];
+      let numCols = Math.floor(canvasWidth / blockSize);
+      for (let col = 0; col < numCols; col++) {
+        if (randomWithSeed(row * 100 + col) < 0.2) {
+          trees.push(col);
         }
       }
+      return trees;
     }
-
-    // Listen for updates in the lobby to render the game state in real time
-    const lobbyRef = ref(db, "lobbies/" + lobbyId);
-    onValue(lobbyRef, (snapshot) => {
-      const gameData = snapshot.val();
-      renderGame(gameData);
+    
+    // Generate cars for road lanes.
+    function getCarsForLane(row) {
+      if (getLaneType(row) !== "road") return [];
+      let cars = [];
+      let numCars = Math.floor(randomWithSeed(row * 2) * 3) + 2; // 2 to 4 cars
+      let direction = (row % 2 === 0) ? "right" : "left";
+      let baseSpeed = 2 + randomWithSeed(row * 3) * 3;
+      for (let i = 0; i < numCars; i++) {
+        let spacing = canvasWidth / numCars;
+        let x = spacing * i + randomWithSeed(row * 10 + i) * spacing;
+        let carWidth = 60;
+        let carHeight = blockSize * 0.8;
+        cars.push({
+          x: x,
+          y: row * blockSize + (blockSize - carHeight) / 2,
+          width: carWidth,
+          height: carHeight,
+          speed: baseSpeed * (direction === "left" ? -1 : 1)
+        });
+      }
+      return cars;
+    }
+    
+    // Train events now have unique cycle offsets per lane so they aren’t synchronized.
+    const trainCycle = 10000; // 10-second cycle
+    function getTrainEvent(row) {
+      let offset = randomWithSeed(row + 1000) * trainCycle;
+      let t = (Date.now() + offset) % trainCycle;
+      if (t < 2000) return { state: "warning" };
+      else if (t < 5000) {
+        let timeFactor = (t - 2000) / 3000; // 0 to 1
+        let x = ((timeFactor * (canvasWidth + 200)) - 200);
+        return { state: "active", x: x, width: 200, height: blockSize * 0.8 };
+      } else return { state: "cooldown" };
+    }
+    
+    // ----- Input: Discrete Movement with Collision Check for Trees -----
+    let moveLock = { ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
+    window.addEventListener("keydown", (e) => {
+      if (!moveLock[e.key] && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+        // Compute candidate new position.
+        let newX = player.gridX;
+        let newY = player.gridY;
+        if (e.key === "ArrowUp") newY -= 1;
+        if (e.key === "ArrowDown") newY += 1;
+        if (e.key === "ArrowLeft") newX -= 1;
+        if (e.key === "ArrowRight") newX += 1;
+        
+        // Restrict horizontal movement within available columns.
+        let numCols = Math.floor(canvasWidth / blockSize);
+        if (newX < 0 || newX >= numCols) {
+          moveLock[e.key] = true;
+          return;
+        }
+        
+        // In land lanes, check if the target cell has a tree.
+        if (getLaneType(newY) === "land") {
+          let trees = getTreesForLane(newY);
+          if (trees.includes(newX)) {
+            moveLock[e.key] = true;
+            return; // Block move into a tree.
+          }
+        }
+        
+        // Valid move: update player's grid position.
+        player.gridX = newX;
+        player.gridY = newY;
+        // Update score based on how far upward the player has gone.
+        let newScore = player.startRow - player.gridY;
+        if (newScore > player.score) {
+          player.score = newScore;
+        }
+        update(ref(db, "lobbies/crossyLobby/players/" + playerId), player);
+        moveLock[e.key] = true;
+      }
     });
-
-    // Main game loop: update the player's state every 100ms
-    setInterval(() => {
-      updatePlayerState();
-    }, 100);
+    window.addEventListener("keyup", (e) => {
+      if (moveLock[e.key]) moveLock[e.key] = false;
+    });
+    
+    // ----- Player Death & Respawn -----
+    function respawnPlayer() {
+      player.alive = false;
+      update(ref(db, "lobbies/crossyLobby/players/" + playerId), player);
+      setTimeout(() => {
+        let numCols = Math.floor(canvasWidth / blockSize);
+        player.gridX = Math.floor(numCols / 2);
+        player.gridY = player.startRow;
+        player.alive = true;
+        update(ref(db, "lobbies/crossyLobby/players/" + playerId), player);
+      }, 1000);
+    }
+    
+    // ----- Rendering & Game Loop -----
+    let cameraOffsetY = 0;
+    function renderGame() {
+      ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+      
+      // Compute player's pixel position.
+      let playerPixelX = player.gridX * blockSize;
+      let playerPixelY = player.gridY * blockSize;
+      
+      // Update camera so the player remains roughly 70% from the bottom.
+      let targetOffsetY = playerPixelY - canvasHeight * 0.7;
+      cameraOffsetY += (targetOffsetY - cameraOffsetY) * 0.1;
+      
+      // Determine which rows are visible.
+      let startRow = Math.floor(cameraOffsetY / blockSize);
+      let numRows = Math.ceil(canvasHeight / blockSize) + 1;
+      
+      for (let row = startRow; row < startRow + numRows; row++) {
+        let laneType = getLaneType(row);
+        let yPos = row * blockSize - cameraOffsetY;
+        
+        // Draw lane backgrounds with improved graphics.
+        if (laneType === "road") {
+          ctx.fillStyle = "#444";
+          ctx.fillRect(0, yPos, canvasWidth, blockSize);
+          // Road markings
+          ctx.strokeStyle = "#fff";
+          ctx.lineWidth = 2;
+          ctx.setLineDash([10, 10]);
+          ctx.beginPath();
+          ctx.moveTo(0, yPos + blockSize/2);
+          ctx.lineTo(canvasWidth, yPos + blockSize/2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        } else if (laneType === "land") {
+          // Use a green gradient for land.
+          let grd = ctx.createLinearGradient(0, yPos, 0, yPos + blockSize);
+          grd.addColorStop(0, "#76c893");
+          grd.addColorStop(1, "#4caf50");
+          ctx.fillStyle = grd;
+          ctx.fillRect(0, yPos, canvasWidth, blockSize);
+          // Draw trees.
+          let trees = getTreesForLane(row);
+          for (let col of trees) {
+            let treeX = col * blockSize;
+            // Draw trunk.
+            ctx.fillStyle = "#8B4513";
+            ctx.fillRect(treeX + blockSize * 0.4, yPos + blockSize * 0.5, blockSize * 0.2, blockSize * 0.5);
+            // Draw foliage.
+            ctx.fillStyle = "#228B22";
+            ctx.beginPath();
+            ctx.arc(treeX + blockSize * 0.5, yPos + blockSize * 0.4, blockSize * 0.3, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        } else if (laneType === "train") {
+          // Concrete look for train lanes.
+          ctx.fillStyle = "#666";
+          ctx.fillRect(0, yPos, canvasWidth, blockSize);
+          let train = getTrainEvent(row);
+          if (train.state === "warning") {
+            if (Math.floor(Date.now()/200) % 2 === 0) {
+              ctx.fillStyle = "rgba(255,0,0,0.5)";
+              ctx.fillRect(0, yPos, canvasWidth, blockSize);
+            }
+          } else if (train.state === "active") {
+            let x = train.x;
+            ctx.fillStyle = "#FF9800";
+            ctx.fillRect(x, yPos + (blockSize - train.height)/2, train.width, train.height);
+            // Check collision with train.
+            if (player.alive && player.gridY === row) {
+              let playerRect = { x: player.gridX * blockSize, y: yPos, width: blockSize, height: blockSize };
+              let trainRect = { x: x, y: yPos + (blockSize - train.height)/2, width: train.width, height: train.height };
+              if (playerRect.x < trainRect.x + trainRect.width &&
+                  playerRect.x + playerRect.width > trainRect.x &&
+                  playerRect.y < trainRect.y + trainRect.height &&
+                  playerRect.y + playerRect.height > trainRect.y) {
+                respawnPlayer();
+              }
+            }
+          }
+        }
+        
+        // In road lanes, draw animated cars.
+        if (laneType === "road") {
+          let cars = getCarsForLane(row);
+          for (let car of cars) {
+            let t = Date.now() / 50;
+            let pos = car.x + car.speed * t;
+            pos = ((pos % (canvasWidth + car.width)) + (canvasWidth + car.width)) % (canvasWidth + car.width) - car.width;
+            // Draw car with window details.
+            ctx.fillStyle = "#e53935";
+            ctx.fillRect(pos, yPos + (blockSize - car.height)/2, car.width, car.height);
+            ctx.fillStyle = "#fff";
+            ctx.fillRect(pos + 10, yPos + (blockSize - car.height)/2 + 5, car.width - 20, car.height/2);
+            // Check collision with local player.
+            if (player.alive && player.gridY === row) {
+              let playerRect = { x: player.gridX * blockSize, y: yPos, width: blockSize, height: blockSize };
+              let carRect = { x: pos, y: yPos + (blockSize - car.height)/2, width: car.width, height: car.height };
+              if (playerRect.x < carRect.x + carRect.width &&
+                  playerRect.x + playerRect.width > carRect.x &&
+                  playerRect.y < carRect.y + carRect.height &&
+                  playerRect.y + playerRect.height > carRect.y) {
+                respawnPlayer();
+              }
+            }
+          }
+        }
+      }
+      
+      // Draw other players.
+      for (let id in otherPlayers) {
+        if (id === playerId) continue;
+        const op = otherPlayers[id];
+        let opX = op.gridX * blockSize;
+        let opY = op.gridY * blockSize - cameraOffsetY;
+        if (op.avatar) {
+          let img = new Image();
+          img.src = op.avatar;
+          ctx.drawImage(img, opX, opY, blockSize, blockSize);
+        } else {
+          ctx.fillStyle = "#fff";
+          ctx.fillRect(opX, opY, blockSize, blockSize);
+        }
+        ctx.fillStyle = "#000";
+        ctx.font = "12px sans-serif";
+        ctx.fillText(op.name || "Anon", opX, opY + 12);
+      }
+      
+      // Draw local player on top.
+      let localX = player.gridX * blockSize;
+      let localY = player.gridY * blockSize - cameraOffsetY;
+      if (player.avatar) {
+        let img = new Image();
+        img.src = player.avatar;
+        ctx.drawImage(img, localX, localY, blockSize, blockSize);
+      } else {
+        ctx.fillStyle = "#ff0";
+        ctx.fillRect(localX, localY, blockSize, blockSize);
+      }
+      ctx.fillStyle = "#000";
+      ctx.font = "12px sans-serif";
+      ctx.fillText(player.name, localX, localY + 12);
+      
+      // Update score display.
+      scoreDisplay.textContent = "Score: " + player.score;
+    }
+    
+    function gameLoop() {
+      renderGame();
+      requestAnimationFrame(gameLoop);
+    }
+    
+    // ----- Start Game After Login -----
+    startGameBtn.addEventListener("click", () => {
+      const name = playerNameInput.value.trim();
+      if (!name) {
+        alert("Please enter a name!");
+        return;
+      }
+      player.name = name;
+      player.avatar = avatarCanvas.toDataURL();
+      // Set starting grid position (safe area at the bottom).
+      player.startRow = Math.floor(canvasHeight / blockSize) - 1;
+      let numCols = Math.floor(canvasWidth / blockSize);
+      player.gridX = Math.floor(numCols / 2);
+      player.gridY = player.startRow;
+      player.score = 0;
+      
+      // Write player data to Firebase and ensure removal on disconnect.
+      const playerRef = ref(db, "lobbies/crossyLobby/players/" + playerId);
+      set(playerRef, player);
+      onDisconnect(playerRef).remove();
+      
+      // Hide login UI and show game canvas.
+      loginContainer.style.display = "none";
+      canvas.style.display = "block";
+      
+      gameLoop();
+    });
   </script>
 </body>
 </html>
