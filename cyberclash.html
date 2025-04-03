@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Crossy Road Multiplayer - Gravity Gun Mod</title>
+  <title>Crossy Road Multiplayer - Gun Feature for Pranav</title>
   <style>
     html, body {
       margin: 0;
@@ -25,7 +25,7 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      z-index: 20;
+      z-index: 10;
     }
     #loginContainer input, #loginContainer button {
       font-size: 18px;
@@ -52,32 +52,12 @@
       text-shadow: 2px 2px 4px #000;
       z-index: 5;
     }
-    /* Moderator Panel (only for mod "pode") */
-    #modPanel {
-      position: absolute;
-      right: 10px;
-      top: 50px;
-      background: rgba(0,0,0,0.8);
-      color: #fff;
-      padding: 10px;
-      border-radius: 8px;
-      z-index: 20;
-      font-size: 14px;
-      display: none;
-      max-width: 250px;
-    }
-    #modPanel select, #modPanel input, #modPanel button {
-      width: 100%;
-      margin: 3px 0;
-      padding: 4px;
-      font-size: 14px;
-    }
   </style>
 </head>
 <body>
   <!-- Login Screen -->
   <div id="loginContainer">
-    <h1>Crossy Road Multiplayer - Gravity Gun Mod</h1>
+    <h1>Crossy Road Multiplayer - Enhanced</h1>
     <input type="text" id="playerName" placeholder="Enter your name" />
     <p>Draw your avatar (a square face):</p>
     <canvas id="avatarCanvas" width="100" height="100"></canvas>
@@ -85,19 +65,6 @@
       <button id="clearAvatar">Clear Drawing</button>
       <button id="startGame">Go</button>
     </div>
-  </div>
-  
-  <!-- Moderator Panel (only visible for mod "pode") -->
-  <div id="modPanel">
-    <h3>Moderator Panel</h3>
-    <select id="modTargetSelect"></select>
-    <button id="modResetBtn">Reset Player</button>
-    <button id="modKickBtn">Kick Player</button>
-    <input type="text" id="modChangeName" placeholder="New name" />
-    <button id="modChangeNameBtn">Change Name</button>
-    <input type="text" id="modAlertMsg" placeholder="Alert message" />
-    <button id="modAlertBtn">Send Alert</button>
-    <button id="modRefreshBtn">Refresh List</button>
   </div>
   
   <!-- Score Display -->
@@ -121,12 +88,13 @@
       appId: "1:643049506369:web:15e6e0bbf6bd0462bca8c0",
       measurementId: "G-KGWJWD3Z3C"
     };
+    
     const app = initializeApp(firebaseConfig);
     const analytics = getAnalytics(app);
     const db = getDatabase(app);
     
     // ----- Global Constants & Variables -----
-    const blockSize = 50; // one block equals 50px
+    const blockSize = 50;   // Each move is one block (50px)
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
     let canvasWidth = window.innerWidth;
@@ -140,50 +108,10 @@
       canvas.height = canvasHeight;
     });
     
+    // Score display element
     const scoreDisplay = document.getElementById("scoreDisplay");
-    const modPanel = document.getElementById("modPanel");
-    const modTargetSelect = document.getElementById("modTargetSelect");
-    const modResetBtn = document.getElementById("modResetBtn");
-    const modKickBtn = document.getElementById("modKickBtn");
-    const modChangeName = document.getElementById("modChangeName");
-    const modChangeNameBtn = document.getElementById("modChangeNameBtn");
-    const modAlertMsg = document.getElementById("modAlertMsg");
-    const modAlertBtn = document.getElementById("modAlertBtn");
-    const modRefreshBtn = document.getElementById("modRefreshBtn");
     
-    // Particle system for effects
-    let particles = [];
-    function spawnParticle(x, y, color) {
-      particles.push({
-        x: x,
-        y: y,
-        vx: (Math.random() - 0.5) * 2,
-        vy: (Math.random() - 0.5) * 2,
-        life: 100,
-        color: color
-      });
-    }
-    function updateParticles(dt) {
-      for (let i = particles.length - 1; i >= 0; i--) {
-        let p = particles[i];
-        p.x += p.vx * dt * 0.01;
-        p.y += p.vy * dt * 0.01;
-        p.life -= dt;
-        if (p.life <= 0) particles.splice(i, 1);
-      }
-    }
-    function renderParticles() {
-      particles.forEach(p => {
-        ctx.fillStyle = p.color;
-        ctx.globalAlpha = Math.max(p.life / 100, 0);
-        ctx.beginPath();
-        ctx.arc(p.x - 0, p.y - cameraOffsetY, 3, 0, Math.PI * 2);
-        ctx.fill();
-      });
-      ctx.globalAlpha = 1;
-    }
-    
-    // Shared seed for world generation
+    // Shared seed for world generation (all players see the same world)
     let seed;
     const seedRef = ref(db, "lobbies/crossyLobby/seed");
     onValue(seedRef, snapshot => {
@@ -194,6 +122,8 @@
         set(seedRef, seed);
       }
     });
+    
+    // Simple seeded random functions
     function seededRandom(s) {
       let x = Math.sin(s) * 10000;
       return x - Math.floor(x);
@@ -237,28 +167,32 @@
     // ----- Player Object & Initialization -----
     let player = {
       name: "",
-      avatar: "",
-      gridX: 0,
+      avatar: "",  // Data URL for avatar image
+      gridX: 0,    // Grid coordinates (in blocks)
       gridY: 0,
       alive: true,
-      score: 0,
-      // For gravity gun (for mod "reed")
-      gravityGunMode: "none", // "forth", "back", or "none"
-      gunAngle: 0,
-      isMod: false,
-      modAlert: ""
+      score: 0
     };
     let playerId = '_' + Math.random().toString(36).substr(2, 9);
     
-    // Multiplayer players
+    // If the player's name is "pranav", give them gun properties.
+    // (These will be set after login if applicable.)
+    
+    // ----- Multiplayer: Sync Other Players -----
     let otherPlayers = {};
     const lobbyPlayersRef = ref(db, "lobbies/crossyLobby/players");
     onValue(lobbyPlayersRef, snapshot => {
       const data = snapshot.val();
       if (data) {
         otherPlayers = data;
-        if (player.isMod) refreshModTargetList();
       }
+    });
+    
+    // ----- Gun Bullets (for pranav) -----
+    let gunBullets = {};
+    const gunBulletsRef = ref(db, "lobbies/crossyLobby/gunBullets");
+    onValue(gunBulletsRef, snapshot => {
+      gunBullets = snapshot.val() || {};
     });
     
     // ----- World Generation Functions -----
@@ -271,6 +205,8 @@
       else if (r < 0.5) return "road";
       else return "land";
     }
+    
+    // For "land" lanes, generate trees (impassable obstacles)
     function getTreesForLane(row) {
       let trees = [];
       let numCols = Math.floor(canvasWidth / blockSize);
@@ -281,13 +217,17 @@
       }
       return trees;
     }
+    
+    // Generate cars for road lanes with increased and random speeds.
     function getCarsForLane(row) {
       if (getLaneType(row) !== "road") return [];
       let cars = [];
-      let numCars = Math.floor(randomWithSeed(row * 2) * 3) + 2;
+      let numCars = Math.floor(randomWithSeed(row * 2) * 3) + 2; // 2 to 4 cars
       let direction = (row % 2 === 0) ? "right" : "left";
+      // Original base speed between 2 and 5
       let baseSpeed = 2 + randomWithSeed(row * 3) * 3;
       for (let i = 0; i < numCars; i++) {
+        // Apply a multiplier between 3 and 3.5
         let speedMultiplier = 3 + randomWithSeed(row * 10 + i) * 0.5;
         let finalSpeed = baseSpeed * speedMultiplier;
         let spacing = canvasWidth / numCars;
@@ -304,122 +244,75 @@
       }
       return cars;
     }
-    const trainCycle = 10000;
+    
+    // Train events now have a very short active phase (200ms).
+    const trainCycle = 10000; // 10-second cycle
     function getTrainEvent(row) {
       let offset = randomWithSeed(row + 1000) * trainCycle;
       let t = (Date.now() + offset) % trainCycle;
       if (t < 2000) return { state: "warning" };
       else if (t < 2200) {
-        let timeFactor = (t - 2000) / 200;
+        // Active phase lasts 200ms (0.2 seconds)
+        let timeFactor = (t - 2000) / 200; // 0 to 1 over 200ms
         let x = ((timeFactor * (canvasWidth + 200)) - 200);
         return { state: "active", x: x, width: 200, height: blockSize * 0.8 };
       } else return { state: "cooldown" };
     }
     
-    // ----- Gravity Gun for Moderator ("reed") -----
-    // If a mod is active (player.isMod === true), then key 1 sets gravityGunMode to "forth" (red),
-    // key 2 sets it to "back" (blue), and key 3 puts it away.
-    window.addEventListener("keydown", (e) => {
-      // Only for mod users
-      if (player.isMod) {
-        if (e.key === "1") {
-          player.gravityGunMode = "forth";
-          update(ref(db, "lobbies/crossyLobby/players/" + playerId), { gravityGunMode: player.gravityGunMode });
-        } else if (e.key === "2") {
-          player.gravityGunMode = "back";
-          update(ref(db, "lobbies/crossyLobby/players/" + playerId), { gravityGunMode: player.gravityGunMode });
-        } else if (e.key === "3") {
-          player.gravityGunMode = "none";
-          update(ref(db, "lobbies/crossyLobby/players/" + playerId), { gravityGunMode: player.gravityGunMode });
-        }
-      }
-    });
+    // ----- Gun Functionality for "pranav" -----
+    // If the player's name is "pranav" (case-insensitive), they get a gun.
+    // The gun is hidden initially (gunActive false). Pressing "1" toggles it.
+    // When active, the gun points toward the mouse pointer.
+    // Left-click fires a bullet that moves quickly and kills any player hit.
+    const bulletSpeed = 1000; // pixels per second
+    if (playerNameInput.value.toLowerCase() === "pranav") {
+      // We'll set gun properties after login.
+    }
     
-    // Update gun angle on mouse move if mod and gravity gun is active
+    // Listen for mouse movement and update gun angle (only if gun is active and player is pranav)
     document.addEventListener("mousemove", (e) => {
-      if (player.isMod && player.gravityGunMode !== "none") {
-        let pCenterX = player.gridX * blockSize + blockSize/2;
-        let pCenterY = player.gridY * blockSize + blockSize/2;
-        // Convert mouse coordinates to world (add camera offset in y)
+      if (player.gunActive && player.name.toLowerCase() === "pranav") {
+        // Player's world center
+        let pCenterX = player.gridX * blockSize + blockSize / 2;
+        let pCenterY = player.gridY * blockSize + blockSize / 2;
+        // Convert mouse coordinates to world coordinates (add cameraOffsetY)
         let worldMouseX = e.clientX;
         let worldMouseY = e.clientY + cameraOffsetY;
         let dx = worldMouseX - pCenterX;
         let dy = worldMouseY - pCenterY;
         let angle = Math.atan2(dy, dx);
         player.gunAngle = angle;
-        update(ref(db, "lobbies/crossyLobby/players/" + playerId), { gunAngle: player.gunAngle });
+        // Update player's gun state in Firebase.
+        update(ref(db, "lobbies/crossyLobby/players/" + playerId), { gunActive: player.gunActive, gunAngle: player.gunAngle });
       }
     });
     
-    // On mouse click, if mod with gravity gun active, check for target and apply effect
+    // Listen for mouse clicks to fire bullet (if gun active)
     document.addEventListener("mousedown", (e) => {
-      if (player.isMod && player.gravityGunMode !== "none") {
-        // Determine click world coordinates
-        let clickX = e.clientX;
-        let clickY = e.clientY + cameraOffsetY;
-        // Check if click falls within any other player's block
-        for (let id in otherPlayers) {
-          if (id === playerId) continue;
-          let op = otherPlayers[id];
-          let opX = op.gridX * blockSize;
-          let opY = op.gridY * blockSize;
-          if (clickX >= opX && clickX <= opX + blockSize &&
-              clickY >= opY && clickY <= opY + blockSize && op.alive) {
-            // Gravity effect: compute direction relative to mod
-            let modCenterX = player.gridX;
-            let modCenterY = player.gridY;
-            let dx = op.gridX - modCenterX;
-            let dy = op.gridY - modCenterY;
-            // For "forth" mode, pull one block closer; for "back" mode, push one block away.
-            let newX = op.gridX;
-            let newY = op.gridY;
-            if (player.gravityGunMode === "forth") {
-              newX -= (dx > 0) ? 1 : (dx < 0 ? -1 : 0);
-              newY -= (dy > 0) ? 1 : (dy < 0 ? -1 : 0);
-            } else if (player.gravityGunMode === "back") {
-              newX += (dx > 0) ? 1 : (dx < 0 ? -1 : 0);
-              newY += (dy > 0) ? 1 : (dy < 0 ? -1 : 0);
-            }
-            // Update the target player's position in Firebase.
-            update(ref(db, "lobbies/crossyLobby/players/" + id), { gridX: newX, gridY: newY });
-            // Spawn particles at target center.
-            spawnParticle(opX + blockSize/2, opY + blockSize/2, (player.gravityGunMode === "forth") ? "red" : "blue");
-          }
-        }
+      if (e.button === 0 && player.gunActive && player.name.toLowerCase() === "pranav") {
+        // Fire a bullet from player's center in direction of gunAngle.
+        let pCenterX = player.gridX * blockSize + blockSize / 2;
+        let pCenterY = player.gridY * blockSize + blockSize / 2;
+        let vx = Math.cos(player.gunAngle) * bulletSpeed;
+        let vy = Math.sin(player.gunAngle) * bulletSpeed;
+        let bullet = {
+          shooter: playerId,
+          x: pCenterX,
+          y: pCenterY,
+          vx: vx,
+          vy: vy,
+          created: Date.now()
+        };
+        // Push the bullet to Firebase.
+        push(ref(db, "lobbies/crossyLobby/gunBullets"), bullet);
       }
     });
     
-    // ----- Moderator Panel Functions -----
-    function refreshModTargetList() {
-      // Populate the mod target dropdown with other players
-      modTargetSelect.innerHTML = "";
-      for (let id in otherPlayers) {
-        if (id === playerId) continue;
-        let option = document.createElement("option");
-        option.value = id;
-        option.textContent = otherPlayers[id].name || "Anon";
-        modTargetSelect.appendChild(option);
-      }
-    }
-    modRefreshBtn.addEventListener("click", refreshModTargetList);
-    modResetBtn.addEventListener("click", () => {
-      let targetId = modTargetSelect.value;
-      if (targetId) respawnPlayer(targetId);
-    });
-    modKickBtn.addEventListener("click", () => {
-      let targetId = modTargetSelect.value;
-      if (targetId) remove(ref(db, "lobbies/crossyLobby/players/" + targetId));
-    });
-    modChangeNameBtn.addEventListener("click", () => {
-      let targetId = modTargetSelect.value;
-      if (targetId && modChangeName.value.trim() !== "") {
-        update(ref(db, "lobbies/crossyLobby/players/" + targetId), { name: modChangeName.value.trim() });
-      }
-    });
-    modAlertBtn.addEventListener("click", () => {
-      let targetId = modTargetSelect.value;
-      if (targetId && modAlertMsg.value.trim() !== "") {
-        update(ref(db, "lobbies/crossyLobby/players/" + targetId), { modAlert: modAlertMsg.value.trim() });
+    // Listen for key "1" to toggle gun visibility (for pranav only)
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "1" && player.name.toLowerCase() === "pranav") {
+        player.gunActive = !player.gunActive;
+        update(ref(db, "lobbies/crossyLobby/players/" + playerId), { gunActive: player.gunActive, gunAngle: player.gunAngle });
       }
     });
     
@@ -461,6 +354,7 @@
     
     // ----- Player Death & Respawn -----
     function respawnPlayer(targetId) {
+      // If targetId is local player, run local respawn logic.
       if (targetId === playerId) {
         player.alive = false;
         update(ref(db, "lobbies/crossyLobby/players/" + playerId), player);
@@ -472,22 +366,59 @@
           update(ref(db, "lobbies/crossyLobby/players/" + playerId), player);
         }, 1000);
       } else {
+        // For remote players, mark them as dead in Firebase.
         update(ref(db, "lobbies/crossyLobby/players/" + targetId), { alive: false });
       }
     }
     
-    // ----- Check for Mod Alerts for Local Player -----
-    onValue(ref(db, "lobbies/crossyLobby/players/" + playerId + "/modAlert"), snapshot => {
-      if (snapshot.exists()) {
-        let msg = snapshot.val();
-        alert("Moderator says: " + msg);
-        update(ref(db, "lobbies/crossyLobby/players/" + playerId), { modAlert: "" });
+    // ----- Update Gun Bullets (Movement & Collision) -----
+    let lastFrameTime = Date.now();
+    
+    function updateGunBullets(dt) {
+      for (let bulletKey in gunBullets) {
+        let bullet = gunBullets[bulletKey];
+        // Update bullet position using dt (in seconds)
+        bullet.x += bullet.vx * (dt / 1000);
+        bullet.y += bullet.vy * (dt / 1000);
+        // Check if bullet is off the visible game world (with some margin)
+        if (bullet.x < -50 || bullet.x > canvasWidth + 50 ||
+            bullet.y < -50 || bullet.y > (canvasHeight + cameraOffsetY + 50)) {
+          remove(ref(db, "lobbies/crossyLobby/gunBullets/" + bulletKey));
+          continue;
+        }
+        // Collision detection: check against all players except the shooter.
+        for (let id in otherPlayers) {
+          if (id === bullet.shooter) continue;
+          let op = otherPlayers[id];
+          // Compute player's absolute position.
+          let opX = op.gridX * blockSize;
+          let opY = op.gridY * blockSize;
+          if (bullet.x >= opX && bullet.x <= opX + blockSize &&
+              bullet.y >= opY && bullet.y <= opY + blockSize &&
+              op.alive) {
+            // Kill the hit player.
+            respawnPlayer(id);
+            remove(ref(db, "lobbies/crossyLobby/gunBullets/" + bulletKey));
+            break;
+          }
+        }
+        // Also check collision with local player if shooter isn't local.
+        if (bullet.shooter !== playerId && player.alive) {
+          let pX = player.gridX * blockSize;
+          let pY = player.gridY * blockSize;
+          if (bullet.x >= pX && bullet.x <= pX + blockSize &&
+              bullet.y >= pY && bullet.y <= pY + blockSize) {
+            respawnPlayer(playerId);
+            remove(ref(db, "lobbies/crossyLobby/gunBullets/" + bulletKey));
+          }
+        }
+        // Update bullet in Firebase.
+        update(ref(db, "lobbies/crossyLobby/gunBullets/" + bulletKey), bullet);
       }
-    });
+    }
     
     // ----- Rendering & Game Loop -----
     let cameraOffsetY = 0;
-    let lastFrameTime = Date.now();
     function renderGame() {
       ctx.clearRect(0, 0, canvasWidth, canvasHeight);
       let playerPixelX = player.gridX * blockSize;
@@ -552,6 +483,7 @@
             }
           }
         }
+        
         if (laneType === "road") {
           let cars = getCarsForLane(row);
           for (let car of cars) {
@@ -576,10 +508,16 @@
         }
       }
       
-      // Draw particles
-      renderParticles();
+      // Draw gun bullets.
+      for (let bulletKey in gunBullets) {
+        let bullet = gunBullets[bulletKey];
+        ctx.fillStyle = "#ff0";
+        ctx.beginPath();
+        ctx.arc(bullet.x - 0, bullet.y - cameraOffsetY, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
       
-      // Draw other players
+      // Draw other players.
       for (let id in otherPlayers) {
         if (id === playerId) continue;
         const op = otherPlayers[id];
@@ -596,14 +534,14 @@
         ctx.fillStyle = "#000";
         ctx.font = "12px sans-serif";
         ctx.fillText(op.name || "Anon", opX, opY + 12);
-        // If a mod has a gravity gun active, draw the gun indicator.
-        if (op.isMod && op.gravityGunMode && op.gravityGunMode !== "none" && op.gunAngle !== undefined) {
+        // If the player has a gun active, draw the gun.
+        if (op.gunActive && op.gunAngle !== undefined) {
           let centerX = opX + blockSize/2;
           let centerY = opY + blockSize/2;
           let gunLength = 30;
           let endX = centerX + Math.cos(op.gunAngle) * gunLength;
           let endY = centerY + Math.sin(op.gunAngle) * gunLength;
-          ctx.strokeStyle = (op.gravityGunMode === "forth") ? "red" : "blue";
+          ctx.strokeStyle = "#000";
           ctx.lineWidth = 4;
           ctx.beginPath();
           ctx.moveTo(centerX, centerY);
@@ -612,7 +550,7 @@
         }
       }
       
-      // Draw local player
+      // Draw local player.
       let localX = player.gridX * blockSize;
       let localY = player.gridY * blockSize - cameraOffsetY;
       if (player.avatar) {
@@ -626,13 +564,13 @@
       ctx.fillStyle = "#000";
       ctx.font = "12px sans-serif";
       ctx.fillText(player.name, localX, localY + 12);
-      if (player.isMod && player.gravityGunMode !== "none" && player.gunAngle !== undefined) {
+      if (player.gunActive && player.gunAngle !== undefined) {
         let centerX = localX + blockSize/2;
         let centerY = localY + blockSize/2;
         let gunLength = 30;
         let endX = centerX + Math.cos(player.gunAngle) * gunLength;
         let endY = centerY + Math.sin(player.gunAngle) * gunLength;
-        ctx.strokeStyle = (player.gravityGunMode === "forth") ? "red" : "blue";
+        ctx.strokeStyle = "#000";
         ctx.lineWidth = 4;
         ctx.beginPath();
         ctx.moveTo(centerX, centerY);
@@ -647,7 +585,7 @@
       let now = Date.now();
       let dt = now - lastFrameTime;
       lastFrameTime = now;
-      updateParticles(dt);
+      updateGunBullets(dt);
       renderGame();
       requestAnimationFrame(gameLoop);
     }
@@ -659,15 +597,11 @@
         alert("Please enter a name!");
         return;
       }
-      // If name is "reed", give mod privileges and set in–game name to "pode"
-      if (name.toLowerCase() === "reed") {
-        player.name = "pode";
-        player.isMod = true;
-        player.gravityGunMode = "none";
+      player.name = name;
+      // If name is "pranav", add gun properties.
+      if (player.name.toLowerCase() === "pranav") {
+        player.gunActive = false;
         player.gunAngle = 0;
-        modPanel.style.display = "block";
-      } else {
-        player.name = name;
       }
       player.avatar = avatarCanvas.toDataURL();
       player.startRow = Math.floor(canvasHeight / blockSize) - 1;
@@ -686,7 +620,6 @@
       lastFrameTime = Date.now();
       gameLoop();
     });
-    
   </script>
 </body>
 </html>
