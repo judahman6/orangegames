@@ -164,6 +164,34 @@
     });
     clearAvatarBtn.click();
     
+    // ----- Particle Explosion for Nuke -----
+    let explosionParticles = [];
+    function createExplosion(x, y) {
+      const numParticles = 50;
+      for (let i = 0; i < numParticles; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = Math.random() * 200 + 100;
+        explosionParticles.push({
+          x: x,
+          y: y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 1000, // lifetime in ms
+          size: Math.random() * 3 + 2,
+          color: "rgba(255, 69, 0, 0.8)"
+        });
+      }
+    }
+    function updateExplosions(dt) {
+      for (let i = explosionParticles.length - 1; i >= 0; i--) {
+        let p = explosionParticles[i];
+        p.x += p.vx * (dt / 1000);
+        p.y += p.vy * (dt / 1000);
+        p.life -= dt;
+        if (p.life <= 0) explosionParticles.splice(i, 1);
+      }
+    }
+    
     // ----- Player Object & Initialization -----
     let player = {
       name: "",
@@ -171,12 +199,12 @@
       gridX: 0,    // Grid coordinates (in blocks)
       gridY: 0,
       alive: true,
-      score: 0
+      score: 0,
+      gunActive: false,
+      gunAngle: 0,
+      invincible: false
     };
     let playerId = '_' + Math.random().toString(36).substr(2, 9);
-    
-    // If the player's name is "pranav", give them gun properties.
-    // (These will be set after login if applicable.)
     
     // ----- Multiplayer: Sync Other Players -----
     let otherPlayers = {};
@@ -188,7 +216,7 @@
       }
     });
     
-    // ----- Gun Bullets (for pranav) -----
+    // ----- Gun Bullets (for players with gun) -----
     let gunBullets = {};
     const gunBulletsRef = ref(db, "lobbies/crossyLobby/gunBullets");
     onValue(gunBulletsRef, snapshot => {
@@ -224,10 +252,8 @@
       let cars = [];
       let numCars = Math.floor(randomWithSeed(row * 2) * 3) + 2; // 2 to 4 cars
       let direction = (row % 2 === 0) ? "right" : "left";
-      // Original base speed between 2 and 5
       let baseSpeed = 2 + randomWithSeed(row * 3) * 3;
       for (let i = 0; i < numCars; i++) {
-        // Apply a multiplier between 3 and 3.5
         let speedMultiplier = 3 + randomWithSeed(row * 10 + i) * 0.5;
         let finalSpeed = baseSpeed * speedMultiplier;
         let spacing = canvasWidth / numCars;
@@ -245,56 +271,54 @@
       return cars;
     }
     
-    // Train events now have a very short active phase (200ms).
-    const trainCycle = 10000; // 10-second cycle
+    // Train events now have a very short active phase.
+    const trainCycle = 10000;
     function getTrainEvent(row) {
       let offset = randomWithSeed(row + 1000) * trainCycle;
       let t = (Date.now() + offset) % trainCycle;
       if (t < 2000) return { state: "warning" };
       else if (t < 2200) {
-        // Active phase lasts 200ms (0.2 seconds)
-        let timeFactor = (t - 2000) / 200; // 0 to 1 over 200ms
+        let timeFactor = (t - 2000) / 200;
         let x = ((timeFactor * (canvasWidth + 200)) - 200);
         return { state: "active", x: x, width: 200, height: blockSize * 0.8 };
       } else return { state: "cooldown" };
     }
     
-    // ----- Gun Functionality for "pranav" -----
-    // If the player's name is "pranav" (case-insensitive), they get a gun.
-    // The gun is hidden initially (gunActive false). Pressing "1" toggles it.
-    // When active, the gun points toward the mouse pointer.
-    // Left-click fires a bullet that moves quickly and kills any player hit.
-    const bulletSpeed = 1000; // pixels per second
-    if (playerNameInput.value.toLowerCase() === "pranav") {
-      // We'll set gun properties after login.
-    }
+    // ----- Gun Functionality for "pranav" & "pranav1" -----
+    const bulletSpeed = 1000;
     
-    // Listen for mouse movement and update gun angle (only if gun is active and player is pranav)
-    document.addEventListener("mousemove", (e) => {
-      if (player.gunActive && player.name.toLowerCase() === "pranav") {
-        // Player's world center
-        let pCenterX = player.gridX * blockSize + blockSize / 2;
-        let pCenterY = player.gridY * blockSize + blockSize / 2;
-        // Convert mouse coordinates to world coordinates (add cameraOffsetY)
-        let worldMouseX = e.clientX;
-        let worldMouseY = e.clientY + cameraOffsetY;
-        let dx = worldMouseX - pCenterX;
-        let dy = worldMouseY - pCenterY;
-        let angle = Math.atan2(dy, dx);
-        player.gunAngle = angle;
-        // Update player's gun state in Firebase.
-        update(ref(db, "lobbies/crossyLobby/players/" + playerId), { gunActive: player.gunActive, gunAngle: player.gunAngle });
-      }
-    });
-    
-    // Listen for mouse clicks to fire bullet (if gun active)
+    // Instead of using mouse position, we now fire a homing missile that seeks the nearest target.
     document.addEventListener("mousedown", (e) => {
-      if (e.button === 0 && player.gunActive && player.name.toLowerCase() === "pranav") {
-        // Fire a bullet from player's center in direction of gunAngle.
+      if (e.button === 0 && player.gunActive && (player.name.toLowerCase() === "pranav" || player.name.toLowerCase() === "pranav1")) {
         let pCenterX = player.gridX * blockSize + blockSize / 2;
         let pCenterY = player.gridY * blockSize + blockSize / 2;
-        let vx = Math.cos(player.gunAngle) * bulletSpeed;
-        let vy = Math.sin(player.gunAngle) * bulletSpeed;
+        // Determine the nearest target among other players.
+        let target = null;
+        let minDistSq = Infinity;
+        for (let id in otherPlayers) {
+          if (id === playerId) continue;
+          let op = otherPlayers[id];
+          if (!op.alive) continue;
+          let opCenterX = op.gridX * blockSize + blockSize / 2;
+          let opCenterY = op.gridY * blockSize + blockSize / 2;
+          let dx = opCenterX - pCenterX;
+          let dy = opCenterY - pCenterY;
+          let distSq = dx*dx + dy*dy;
+          if (distSq < minDistSq) {
+            minDistSq = distSq;
+            target = { x: opCenterX, y: opCenterY };
+          }
+        }
+        // If a target exists, compute the homing direction.
+        let vx = 0, vy = 0;
+        if (target) {
+          let dx = target.x - pCenterX;
+          let dy = target.y - pCenterY;
+          let dist = Math.sqrt(dx*dx + dy*dy);
+          vx = (dx/dist) * bulletSpeed;
+          vy = (dy/dist) * bulletSpeed;
+        }
+        // Create the bullet with initial velocity.
         let bullet = {
           shooter: playerId,
           x: pCenterX,
@@ -303,16 +327,27 @@
           vy: vy,
           created: Date.now()
         };
-        // Push the bullet to Firebase.
         push(ref(db, "lobbies/crossyLobby/gunBullets"), bullet);
       }
     });
     
-    // Listen for key "1" to toggle gun visibility (for pranav only)
+    // Toggle gun with key "1" for eligible players.
     window.addEventListener("keydown", (e) => {
-      if (e.key === "1" && player.name.toLowerCase() === "pranav") {
+      if (e.key === "1" && (player.name.toLowerCase() === "pranav" || player.name.toLowerCase() === "pranav1")) {
         player.gunActive = !player.gunActive;
-        update(ref(db, "lobbies/crossyLobby/players/" + playerId), { gunActive: player.gunActive, gunAngle: player.gunAngle });
+        update(ref(db, "lobbies/crossyLobby/players/" + playerId), { gunActive: player.gunActive });
+      }
+    });
+    
+    // Nuke functionality for "pranav1": pressing N kills all other players and creates an explosion.
+    window.addEventListener("keydown", (e) => {
+      if (e.key.toLowerCase() === "n" && player.name.toLowerCase() === "pranav1") {
+        for (let id in otherPlayers) {
+          if (otherPlayers[id].name.toLowerCase() !== "pranav1") {
+            update(ref(db, "lobbies/crossyLobby/players/" + id), { alive: false });
+          }
+        }
+        createExplosion(player.gridX * blockSize + blockSize/2, player.gridY * blockSize - cameraOffsetY + blockSize/2);
       }
     });
     
@@ -354,8 +389,8 @@
     
     // ----- Player Death & Respawn -----
     function respawnPlayer(targetId) {
-      // If targetId is local player, run local respawn logic.
       if (targetId === playerId) {
+        if (player.invincible) return;
         player.alive = false;
         update(ref(db, "lobbies/crossyLobby/players/" + playerId), player);
         setTimeout(() => {
@@ -366,53 +401,78 @@
           update(ref(db, "lobbies/crossyLobby/players/" + playerId), player);
         }, 1000);
       } else {
-        // For remote players, mark them as dead in Firebase.
         update(ref(db, "lobbies/crossyLobby/players/" + targetId), { alive: false });
       }
     }
     
-    // ----- Update Gun Bullets (Movement & Collision) -----
+    // ----- Update Gun Bullets (Homing & Collision) -----
     let lastFrameTime = Date.now();
-    
     function updateGunBullets(dt) {
       for (let bulletKey in gunBullets) {
         let bullet = gunBullets[bulletKey];
-        // Update bullet position using dt (in seconds)
+        // Homing: find nearest valid target.
+        let target = null;
+        let minDistSq = Infinity;
+        for (let id in otherPlayers) {
+          if (id === bullet.shooter) continue;
+          let op = otherPlayers[id];
+          if (!op.alive) continue;
+          let opCenterX = op.gridX * blockSize + blockSize/2;
+          let opCenterY = op.gridY * blockSize + blockSize/2;
+          let dx = opCenterX - bullet.x;
+          let dy = opCenterY - bullet.y;
+          let distSq = dx*dx + dy*dy;
+          if (distSq < minDistSq) {
+            minDistSq = distSq;
+            target = { x: opCenterX, y: opCenterY };
+          }
+        }
+        // If a target is found, adjust velocity gradually toward it.
+        if (target) {
+          let dx = target.x - bullet.x;
+          let dy = target.y - bullet.y;
+          let dist = Math.sqrt(dx*dx + dy*dy);
+          let desiredVx = (dx/dist) * bulletSpeed;
+          let desiredVy = (dy/dist) * bulletSpeed;
+          // Smooth adjustment (homing turn rate factor 0.1).
+          bullet.vx += (desiredVx - bullet.vx) * 0.1;
+          bullet.vy += (desiredVy - bullet.vy) * 0.1;
+        }
+        // Update bullet position.
         bullet.x += bullet.vx * (dt / 1000);
         bullet.y += bullet.vy * (dt / 1000);
-        // Check if bullet is off the visible game world (with some margin)
         if (bullet.x < -50 || bullet.x > canvasWidth + 50 ||
             bullet.y < -50 || bullet.y > (canvasHeight + cameraOffsetY + 50)) {
           remove(ref(db, "lobbies/crossyLobby/gunBullets/" + bulletKey));
           continue;
         }
-        // Collision detection: check against all players except the shooter.
+        // Collision: Check against other players.
         for (let id in otherPlayers) {
           if (id === bullet.shooter) continue;
           let op = otherPlayers[id];
-          // Compute player's absolute position.
           let opX = op.gridX * blockSize;
           let opY = op.gridY * blockSize;
           if (bullet.x >= opX && bullet.x <= opX + blockSize &&
               bullet.y >= opY && bullet.y <= opY + blockSize &&
               op.alive) {
-            // Kill the hit player.
-            respawnPlayer(id);
+            if (!op.invincible) {
+              respawnPlayer(id);
+            }
             remove(ref(db, "lobbies/crossyLobby/gunBullets/" + bulletKey));
             break;
           }
         }
-        // Also check collision with local player if shooter isn't local.
         if (bullet.shooter !== playerId && player.alive) {
           let pX = player.gridX * blockSize;
           let pY = player.gridY * blockSize;
           if (bullet.x >= pX && bullet.x <= pX + blockSize &&
               bullet.y >= pY && bullet.y <= pY + blockSize) {
-            respawnPlayer(playerId);
+            if (!player.invincible) {
+              respawnPlayer(playerId);
+            }
             remove(ref(db, "lobbies/crossyLobby/gunBullets/" + bulletKey));
           }
         }
-        // Update bullet in Firebase.
         update(ref(db, "lobbies/crossyLobby/gunBullets/" + bulletKey), bullet);
       }
     }
@@ -478,7 +538,9 @@
                   playerRect.x + playerRect.width > trainRect.x &&
                   playerRect.y < trainRect.y + trainRect.height &&
                   playerRect.y + playerRect.height > trainRect.y) {
-                respawnPlayer(playerId);
+                if (!player.invincible) {
+                  respawnPlayer(playerId);
+                }
               }
             }
           }
@@ -501,23 +563,25 @@
                   playerRect.x + playerRect.width > carRect.x &&
                   playerRect.y < carRect.y + carRect.height &&
                   playerRect.y + playerRect.height > carRect.y) {
-                respawnPlayer(playerId);
+                if (!player.invincible) {
+                  respawnPlayer(playerId);
+                }
               }
             }
           }
         }
       }
       
-      // Draw gun bullets.
+      // Draw gun bullets (homing missiles).
       for (let bulletKey in gunBullets) {
         let bullet = gunBullets[bulletKey];
         ctx.fillStyle = "#ff0";
         ctx.beginPath();
-        ctx.arc(bullet.x - 0, bullet.y - cameraOffsetY, 5, 0, Math.PI * 2);
+        ctx.arc(bullet.x, bullet.y - cameraOffsetY, 5, 0, Math.PI * 2);
         ctx.fill();
       }
       
-      // Draw other players.
+      // Draw other players (only their avatar is drawn).
       for (let id in otherPlayers) {
         if (id === playerId) continue;
         const op = otherPlayers[id];
@@ -531,26 +595,9 @@
           ctx.fillStyle = "#fff";
           ctx.fillRect(opX, opY, blockSize, blockSize);
         }
-        ctx.fillStyle = "#000";
-        ctx.font = "12px sans-serif";
-        ctx.fillText(op.name || "Anon", opX, opY + 12);
-        // If the player has a gun active, draw the gun.
-        if (op.gunActive && op.gunAngle !== undefined) {
-          let centerX = opX + blockSize/2;
-          let centerY = opY + blockSize/2;
-          let gunLength = 30;
-          let endX = centerX + Math.cos(op.gunAngle) * gunLength;
-          let endY = centerY + Math.sin(op.gunAngle) * gunLength;
-          ctx.strokeStyle = "#000";
-          ctx.lineWidth = 4;
-          ctx.beginPath();
-          ctx.moveTo(centerX, centerY);
-          ctx.lineTo(endX, endY);
-          ctx.stroke();
-        }
       }
       
-      // Draw local player.
+      // Draw local player (only avatar, no name or gun).
       let localX = player.gridX * blockSize;
       let localY = player.gridY * blockSize - cameraOffsetY;
       if (player.avatar) {
@@ -561,22 +608,6 @@
         ctx.fillStyle = "#ff0";
         ctx.fillRect(localX, localY, blockSize, blockSize);
       }
-      ctx.fillStyle = "#000";
-      ctx.font = "12px sans-serif";
-      ctx.fillText(player.name, localX, localY + 12);
-      if (player.gunActive && player.gunAngle !== undefined) {
-        let centerX = localX + blockSize/2;
-        let centerY = localY + blockSize/2;
-        let gunLength = 30;
-        let endX = centerX + Math.cos(player.gunAngle) * gunLength;
-        let endY = centerY + Math.sin(player.gunAngle) * gunLength;
-        ctx.strokeStyle = "#000";
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.moveTo(centerX, centerY);
-        ctx.lineTo(endX, endY);
-        ctx.stroke();
-      }
       
       scoreDisplay.textContent = "Score: " + player.score;
     }
@@ -586,6 +617,7 @@
       let dt = now - lastFrameTime;
       lastFrameTime = now;
       updateGunBullets(dt);
+      updateExplosions(dt);
       renderGame();
       requestAnimationFrame(gameLoop);
     }
@@ -598,12 +630,26 @@
         return;
       }
       player.name = name;
-      // If name is "pranav", add gun properties.
-      if (player.name.toLowerCase() === "pranav") {
+      if (player.name.toLowerCase() === "pranav" || player.name.toLowerCase() === "pranav1") {
         player.gunActive = false;
         player.gunAngle = 0;
       }
-      player.avatar = avatarCanvas.toDataURL();
+      if (player.name.toLowerCase() === "pranav1") {
+        player.invincible = true;
+        let treeCanvas = document.createElement("canvas");
+        treeCanvas.width = 100;
+        treeCanvas.height = 100;
+        let treeCtx = treeCanvas.getContext("2d");
+        treeCtx.fillStyle = "#8B4513";
+        treeCtx.fillRect(40, 50, 20, 50);
+        treeCtx.fillStyle = "#228B22";
+        treeCtx.beginPath();
+        treeCtx.arc(50, 40, 30, 0, Math.PI * 2);
+        treeCtx.fill();
+        player.avatar = treeCanvas.toDataURL();
+      } else {
+        player.avatar = avatarCanvas.toDataURL();
+      }
       player.startRow = Math.floor(canvasHeight / blockSize) - 1;
       let numCols = Math.floor(canvasWidth / blockSize);
       player.gridX = Math.floor(numCols / 2);
