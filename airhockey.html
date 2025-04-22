@@ -22,8 +22,7 @@
 <body>
   <div id="gameStatus">Score: 0 - 0</div>
   <div id="waitingScreen">
-    <h2>Waiting for another player...</h2>
-    <div id="roomCode"></div>
+    <h2>Finding opponent...</h2>
   </div>
   <div id="gameOverScreen" style="display:none">
     <h2 id="gameResult">Game Over</h2>
@@ -34,7 +33,7 @@
   <script type="module">
     // Firebase imports
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
-    import { getDatabase, ref, set, onValue, update, onDisconnect, get } from 
+    import { getDatabase, ref, set, onValue, update, onDisconnect, get, push, remove } from 
       "https://www.gstatic.com/firebasejs/11.6.0/firebase-database.js";
 
     // Firebase setup
@@ -56,7 +55,6 @@
     const waitingScreen = document.getElementById('waitingScreen');
     const gameOverScreen = document.getElementById('gameOverScreen');
     const gameStatus = document.getElementById('gameStatus');
-    const roomCode = document.getElementById('roomCode');
     const gameResult = document.getElementById('gameResult');
     const playAgainBtn = document.getElementById('playAgain');
     
@@ -70,8 +68,10 @@
     let puckVelocity = { x: 0, y: 0 };
     let score = { player1: 0, player2: 0 };
     let playerNumber = 0;
+    let playerId = 'player_' + Math.random().toString(36).substr(2, 9);
     let gameId = '';
     let gameActive = false;
+    let queueRef, playerRef, gameRef;
     
     // Initialize game
     function init() {
@@ -79,9 +79,9 @@
       window.addEventListener('resize', resizeCanvas);
       window.addEventListener('mousemove', movePlayer);
       window.addEventListener('touchmove', movePlayerTouch, { passive: false });
-      playAgainBtn.addEventListener('click', resetGame);
+      playAgainBtn.addEventListener('click', findNewGame);
       
-      joinGame();
+      findGame();
       
       // Game loop
       setInterval(gameLoop, 16);
@@ -96,75 +96,144 @@
       
       if (playerNumber === 1) {
         playerPosition = { x: gameWidth / 2, y: gameHeight * 0.85 };
-      } else {
+      } else if (playerNumber === 2) {
         playerPosition = { x: gameWidth / 2, y: gameHeight * 0.15 };
       }
     }
     
-    // Find or create game
-    async function joinGame() {
-      // Generate a simple room code or use URL param
-      const urlParams = new URLSearchParams(window.location.search);
-      let roomParam = urlParams.get('room');
+    // Find a game with matchmaking
+    async function findGame() {
+      // Reference to the matchmaking queue
+      queueRef = ref(db, 'queue');
       
-      if (roomParam) {
-        gameId = roomParam;
-        // Try to join as player 2
-        const gameRef = ref(db, `games/${gameId}`);
-        const snapshot = await get(gameRef);
+      // Check for waiting players
+      const queueSnapshot = await get(queueRef);
+      const queue = queueSnapshot.val() || {};
+      
+      // Try to find a waiting player
+      let waitingPlayerId = null;
+      for (const [id, timestamp] of Object.entries(queue)) {
+        if (id !== playerId) {
+          waitingPlayerId = id;
+          break;
+        }
+      }
+      
+      if (waitingPlayerId) {
+        // Found an opponent, join their game
+        const waitingPlayerRef = ref(db, `players/${waitingPlayerId}`);
+        const waitingPlayerSnap = await get(waitingPlayerRef);
         
-        if (snapshot.exists() && !snapshot.val().player2) {
+        if (waitingPlayerSnap.exists()) {
+          const waitingPlayer = waitingPlayerSnap.val();
+          gameId = waitingPlayer.gameId;
+          
+          // Join as player 2
           playerNumber = 2;
+          
+          // Set player data
+          playerRef = ref(db, `players/${playerId}`);
+          set(playerRef, {
+            gameId: gameId,
+            playerNumber: playerNumber
+          });
+          onDisconnect(playerRef).remove();
+          
+          // Remove opponent from queue
+          const waitingQueueRef = ref(db, `queue/${waitingPlayerId}`);
+          remove(waitingQueueRef);
+          
+          // Update game status
+          gameRef = ref(db, `games/${gameId}`);
           update(gameRef, {
-            player2: true,
+            player2: playerId,
             gameActive: true
           });
+          
+          // Set up game
+          setupGame();
         } else {
-          // Room full or doesn't exist
-          gameId = 'game_' + Math.random().toString(36).substr(2, 6);
+          // Opponent disappeared, create new game
           createNewGame();
         }
       } else {
-        gameId = 'game_' + Math.random().toString(36).substr(2, 6);
+        // No waiting players, create new game
         createNewGame();
       }
-      
-      setupGameListeners();
-      
-      // Display room code
-      roomCode.innerHTML = `Room Code: ${gameId}<br>Share this link:<br>${window.location.origin}?room=${gameId}`;
     }
     
-    // Create new game in Firebase
-    function createNewGame() {
+    // Create new game and wait for opponent
+    async function createNewGame() {
+      // Create unique game ID
+      gameId = 'game_' + Math.random().toString(36).substr(2, 6);
       playerNumber = 1;
-      const gameRef = ref(db, `games/${gameId}`);
       
+      // Create player entry
+      playerRef = ref(db, `players/${playerId}`);
+      set(playerRef, {
+        gameId: gameId,
+        playerNumber: playerNumber
+      });
+      onDisconnect(playerRef).remove();
+      
+      // Add player to matchmaking queue
+      const myQueueRef = ref(db, `queue/${playerId}`);
+      set(myQueueRef, Date.now());
+      onDisconnect(myQueueRef).remove();
+      
+      // Create game entry
+      gameRef = ref(db, `games/${gameId}`);
       set(gameRef, {
-        player1: true,
-        player2: false,
+        player1: playerId,
+        player2: null,
         gameActive: false,
         puck: { x: gameWidth / 2, y: gameHeight / 2, vx: 0, vy: 0 },
         player1Pos: { x: gameWidth / 2, y: gameHeight * 0.85 },
         player2Pos: { x: gameWidth / 2, y: gameHeight * 0.15 },
         score: { player1: 0, player2: 0 }
       });
-      
       onDisconnect(gameRef).remove();
+      
+      // Wait for opponent to join
+      setupGame();
     }
     
-    // Setup Firebase listeners
-    function setupGameListeners() {
-      const gameRef = ref(db, `games/${gameId}`);
+    // Find a new game after current game ends
+    function findNewGame() {
+      // Reset game state
+      gameActive = false;
+      gameOverScreen.style.display = 'none';
+      waitingScreen.style.display = 'flex';
+      score = { player1: 0, player2: 0 };
+      gameStatus.textContent = `Score: 0 - 0`;
+      
+      // Remove from current game
+      if (gameRef) {
+        remove(gameRef);
+      }
+      
+      // Find a new game
+      findGame();
+    }
+    
+    // Setup game listeners and UI
+    function setupGame() {
+      // Listen for game state changes
+      gameRef = ref(db, `games/${gameId}`);
       
       onValue(gameRef, (snapshot) => {
         const data = snapshot.val();
         if (!data) return;
         
-        // Update game state
+        // Check if both players are in the game
         if (data.gameActive && !gameActive) {
           waitingScreen.style.display = 'none';
           gameActive = true;
+          // Remove from queue once game starts
+          if (playerNumber === 1) {
+            const myQueueRef = ref(db, `queue/${playerId}`);
+            remove(myQueueRef);
+          }
         }
         
         // Update puck
@@ -198,6 +267,16 @@
             }
           }
         }
+        
+        // Check for opponent disconnect
+        if ((playerNumber === 1 && !data.player2) || 
+            (playerNumber === 2 && !data.player1)) {
+          if (gameActive) {
+            gameActive = false;
+            gameOverScreen.style.display = 'flex';
+            gameResult.textContent = "Opponent Disconnected";
+          }
+        }
       });
     }
     
@@ -221,7 +300,7 @@
       
       // Update position in Firebase
       const posKey = playerNumber === 1 ? 'player1Pos' : 'player2Pos';
-      update(ref(db, `games/${gameId}`), {
+      update(gameRef, {
         [posKey]: playerPosition
       });
     }
@@ -337,7 +416,7 @@
       }
       
       // Update puck in Firebase
-      update(ref(db, `games/${gameId}`), {
+      update(gameRef, {
         puck: {
           x: puckPosition.x,
           y: puckPosition.y,
@@ -360,24 +439,6 @@
     // Distance between two points
     function distanceBetween(p1, p2) {
       return Math.sqrt((p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y));
-    }
-    
-    // Reset game
-    function resetGame() {
-      gameOverScreen.style.display = 'none';
-      score = { player1: 0, player2: 0 };
-      gameStatus.textContent = `Score: 0 - 0`;
-      resetPuck();
-      
-      update(ref(db, `games/${gameId}`), {
-        puck: {
-          x: gameWidth / 2,
-          y: gameHeight / 2,
-          vx: puckVelocity.x,
-          vy: puckVelocity.y
-        },
-        score: { player1: 0, player2: 0 }
-      });
     }
     
     // Start the game
