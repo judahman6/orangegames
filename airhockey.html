@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Online Air Hockey</title>
+  <style>
+    body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+    canvas { display: block; background: #333; }
+    #waitingScreen, #gameOverScreen { 
+      position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+      display: flex; flex-direction: column; justify-content: center; align-items: center;
+      background: rgba(0,0,0,0.8); color: white; text-align: center;
+    }
+    button {
+      background: #4CAF50; color: white; border: none;
+      padding: 10px 20px; margin-top: 20px; cursor: pointer;
+      font-size: 16px; border-radius: 4px;
+    }
+    #gameStatus { position: absolute; top: 10px; left: 10px; color: white; }
+  </style>
+</head>
+<body>
+  <div id="gameStatus">Score: 0 - 0</div>
+  <div id="waitingScreen">
+    <h2>Waiting for another player...</h2>
+    <div id="roomCode"></div>
+  </div>
+  <div id="gameOverScreen" style="display:none">
+    <h2 id="gameResult">Game Over</h2>
+    <button id="playAgain">Play Again</button>
+  </div>
+  <canvas id="gameCanvas"></canvas>
+
+  <script type="module">
+    // Firebase imports
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
+    import { getDatabase, ref, set, onValue, update, onDisconnect, get } from 
+      "https://www.gstatic.com/firebasejs/11.6.0/firebase-database.js";
+
+    // Firebase setup
+    const firebaseConfig = {
+      apiKey: "AIzaSyBnzCoTkxHJ9DvHJl95CAMJ9_jx-qHgVxQ",
+      authDomain: "air-hockey-online.firebaseapp.com",
+      databaseURL: "https://air-hockey-online-default-rtdb.firebaseio.com",
+      projectId: "air-hockey-online",
+      storageBucket: "air-hockey-online.appspot.com",
+      messagingSenderId: "123456789012",
+      appId: "1:123456789012:web:abcdef1234567890abcdef"
+    };
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    
+    // Game elements
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const waitingScreen = document.getElementById('waitingScreen');
+    const gameOverScreen = document.getElementById('gameOverScreen');
+    const gameStatus = document.getElementById('gameStatus');
+    const roomCode = document.getElementById('roomCode');
+    const gameResult = document.getElementById('gameResult');
+    const playAgainBtn = document.getElementById('playAgain');
+    
+    // Game variables
+    let gameWidth, gameHeight;
+    let paddleRadius = 40;
+    let puckRadius = 25;
+    let playerPosition = { x: 0, y: 0 };
+    let opponentPosition = { x: 0, y: 0 };
+    let puckPosition = { x: 0, y: 0 };
+    let puckVelocity = { x: 0, y: 0 };
+    let score = { player1: 0, player2: 0 };
+    let playerNumber = 0;
+    let gameId = '';
+    let gameActive = false;
+    
+    // Initialize game
+    function init() {
+      resizeCanvas();
+      window.addEventListener('resize', resizeCanvas);
+      window.addEventListener('mousemove', movePlayer);
+      window.addEventListener('touchmove', movePlayerTouch, { passive: false });
+      playAgainBtn.addEventListener('click', resetGame);
+      
+      joinGame();
+      
+      // Game loop
+      setInterval(gameLoop, 16);
+    }
+    
+    // Handle resizing
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      gameWidth = canvas.width;
+      gameHeight = canvas.height;
+      
+      if (playerNumber === 1) {
+        playerPosition = { x: gameWidth / 2, y: gameHeight * 0.85 };
+      } else {
+        playerPosition = { x: gameWidth / 2, y: gameHeight * 0.15 };
+      }
+    }
+    
+    // Find or create game
+    async function joinGame() {
+      // Generate a simple room code or use URL param
+      const urlParams = new URLSearchParams(window.location.search);
+      let roomParam = urlParams.get('room');
+      
+      if (roomParam) {
+        gameId = roomParam;
+        // Try to join as player 2
+        const gameRef = ref(db, `games/${gameId}`);
+        const snapshot = await get(gameRef);
+        
+        if (snapshot.exists() && !snapshot.val().player2) {
+          playerNumber = 2;
+          update(gameRef, {
+            player2: true,
+            gameActive: true
+          });
+        } else {
+          // Room full or doesn't exist
+          gameId = 'game_' + Math.random().toString(36).substr(2, 6);
+          createNewGame();
+        }
+      } else {
+        gameId = 'game_' + Math.random().toString(36).substr(2, 6);
+        createNewGame();
+      }
+      
+      setupGameListeners();
+      
+      // Display room code
+      roomCode.innerHTML = `Room Code: ${gameId}<br>Share this link:<br>${window.location.origin}?room=${gameId}`;
+    }
+    
+    // Create new game in Firebase
+    function createNewGame() {
+      playerNumber = 1;
+      const gameRef = ref(db, `games/${gameId}`);
+      
+      set(gameRef, {
+        player1: true,
+        player2: false,
+        gameActive: false,
+        puck: { x: gameWidth / 2, y: gameHeight / 2, vx: 0, vy: 0 },
+        player1Pos: { x: gameWidth / 2, y: gameHeight * 0.85 },
+        player2Pos: { x: gameWidth / 2, y: gameHeight * 0.15 },
+        score: { player1: 0, player2: 0 }
+      });
+      
+      onDisconnect(gameRef).remove();
+    }
+    
+    // Setup Firebase listeners
+    function setupGameListeners() {
+      const gameRef = ref(db, `games/${gameId}`);
+      
+      onValue(gameRef, (snapshot) => {
+        const data = snapshot.val();
+        if (!data) return;
+        
+        // Update game state
+        if (data.gameActive && !gameActive) {
+          waitingScreen.style.display = 'none';
+          gameActive = true;
+        }
+        
+        // Update puck
+        if (data.puck) {
+          puckPosition.x = data.puck.x;
+          puckPosition.y = data.puck.y;
+          puckVelocity.x = data.puck.vx;
+          puckVelocity.y = data.puck.vy;
+        }
+        
+        // Update opponent position
+        if (playerNumber === 1 && data.player2Pos) {
+          opponentPosition = data.player2Pos;
+        } else if (playerNumber === 2 && data.player1Pos) {
+          opponentPosition = data.player1Pos;
+        }
+        
+        // Update score
+        if (data.score) {
+          score = data.score;
+          gameStatus.textContent = `Score: ${score.player1} - ${score.player2}`;
+          
+          // Check for game over (first to 5)
+          if (score.player1 >= 5 || score.player2 >= 5) {
+            gameOverScreen.style.display = 'flex';
+            if ((score.player1 >= 5 && playerNumber === 1) || 
+                (score.player2 >= 5 && playerNumber === 2)) {
+              gameResult.textContent = "You Win!";
+            } else {
+              gameResult.textContent = "You Lose!";
+            }
+          }
+        }
+      });
+    }
+    
+    // Move player paddle
+    function movePlayer(e) {
+      if (!gameActive) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      
+      // Limit paddle movement to player's half
+      let limitedY = y;
+      if (playerNumber === 1 && y < gameHeight / 2) {
+        limitedY = gameHeight / 2;
+      } else if (playerNumber === 2 && y > gameHeight / 2) {
+        limitedY = gameHeight / 2;
+      }
+      
+      playerPosition = { x, y: limitedY };
+      
+      // Update position in Firebase
+      const posKey = playerNumber === 1 ? 'player1Pos' : 'player2Pos';
+      update(ref(db, `games/${gameId}`), {
+        [posKey]: playerPosition
+      });
+    }
+    
+    // Handle touch events
+    function movePlayerTouch(e) {
+      e.preventDefault();
+      if (e.touches.length > 0) {
+        const touch = e.touches[0];
+        movePlayer(touch);
+      }
+    }
+    
+    // Main game loop
+    function gameLoop() {
+      if (!gameActive) return;
+      
+      // Clear canvas
+      ctx.clearRect(0, 0, gameWidth, gameHeight);
+      
+      // Draw center line
+      ctx.beginPath();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 5;
+      ctx.setLineDash([15, 15]);
+      ctx.moveTo(0, gameHeight / 2);
+      ctx.lineTo(gameWidth, gameHeight / 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      
+      // Draw goals
+      ctx.fillStyle = '#555';
+      const goalWidth = gameWidth / 3;
+      ctx.fillRect((gameWidth - goalWidth) / 2, 0, goalWidth, 10);
+      ctx.fillRect((gameWidth - goalWidth) / 2, gameHeight - 10, goalWidth, 10);
+      
+      // Draw paddles
+      ctx.fillStyle = playerNumber === 1 ? '#f00' : '#00f';
+      ctx.beginPath();
+      ctx.arc(playerPosition.x, playerPosition.y, paddleRadius, 0, Math.PI * 2);
+      ctx.fill();
+      
+      ctx.fillStyle = playerNumber === 1 ? '#00f' : '#f00';
+      ctx.beginPath();
+      ctx.arc(opponentPosition.x, opponentPosition.y, paddleRadius, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Draw puck
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(puckPosition.x, puckPosition.y, puckRadius, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Handle physics if we're player 1
+      if (playerNumber === 1) {
+        updatePuckPhysics();
+      }
+    }
+    
+    // Update puck physics
+    function updatePuckPhysics() {
+      // Move puck
+      puckPosition.x += puckVelocity.x;
+      puckPosition.y += puckVelocity.y;
+      
+      // Apply friction
+      puckVelocity.x *= 0.99;
+      puckVelocity.y *= 0.99;
+      
+      // Boundary collisions (walls)
+      if (puckPosition.x < puckRadius || puckPosition.x > gameWidth - puckRadius) {
+        puckVelocity.x *= -1;
+        puckPosition.x = Math.max(puckRadius, Math.min(puckPosition.x, gameWidth - puckRadius));
+      }
+      
+      // Check for paddle collisions
+      const distToPlayer = distanceBetween(puckPosition, playerPosition);
+      const distToOpponent = distanceBetween(puckPosition, opponentPosition);
+      
+      if (distToPlayer < puckRadius + paddleRadius) {
+        // Calculate bounce angle
+        const angle = Math.atan2(puckPosition.y - playerPosition.y, puckPosition.x - playerPosition.x);
+        const speed = Math.sqrt(puckVelocity.x * puckVelocity.x + puckVelocity.y * puckVelocity.y);
+        const newSpeed = Math.max(speed, 10);
+        puckVelocity.x = Math.cos(angle) * newSpeed;
+        puckVelocity.y = Math.sin(angle) * newSpeed;
+      }
+      
+      if (distToOpponent < puckRadius + paddleRadius) {
+        // Calculate bounce angle
+        const angle = Math.atan2(puckPosition.y - opponentPosition.y, puckPosition.x - opponentPosition.x);
+        const speed = Math.sqrt(puckVelocity.x * puckVelocity.x + puckVelocity.y * puckVelocity.y);
+        const newSpeed = Math.max(speed, 10);
+        puckVelocity.x = Math.cos(angle) * newSpeed;
+        puckVelocity.y = Math.sin(angle) * newSpeed;
+      }
+      
+      // Check for goals
+      const goalWidth = gameWidth / 3;
+      const goalLeft = (gameWidth - goalWidth) / 2;
+      const goalRight = goalLeft + goalWidth;
+      
+      // Top goal (player 2 scores)
+      if (puckPosition.y < puckRadius && puckPosition.x > goalLeft && puckPosition.x < goalRight) {
+        score.player2++;
+        resetPuck();
+      }
+      
+      // Bottom goal (player 1 scores)
+      if (puckPosition.y > gameHeight - puckRadius && puckPosition.x > goalLeft && puckPosition.x < goalRight) {
+        score.player1++;
+        resetPuck();
+      }
+      
+      // Update puck in Firebase
+      update(ref(db, `games/${gameId}`), {
+        puck: {
+          x: puckPosition.x,
+          y: puckPosition.y,
+          vx: puckVelocity.x,
+          vy: puckVelocity.y
+        },
+        score: score
+      });
+    }
+    
+    // Reset puck to center
+    function resetPuck() {
+      puckPosition = { x: gameWidth / 2, y: gameHeight / 2 };
+      puckVelocity = { 
+        x: (Math.random() * 10 - 5),
+        y: (Math.random() > 0.5 ? 5 : -5)
+      };
+    }
+    
+    // Distance between two points
+    function distanceBetween(p1, p2) {
+      return Math.sqrt((p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y));
+    }
+    
+    // Reset game
+    function resetGame() {
+      gameOverScreen.style.display = 'none';
+      score = { player1: 0, player2: 0 };
+      gameStatus.textContent = `Score: 0 - 0`;
+      resetPuck();
+      
+      update(ref(db, `games/${gameId}`), {
+        puck: {
+          x: gameWidth / 2,
+          y: gameHeight / 2,
+          vx: puckVelocity.x,
+          vy: puckVelocity.y
+        },
+        score: { player1: 0, player2: 0 }
+      });
+    }
+    
+    // Start the game
+    init();
+  </script>
+</body>
+</html>
